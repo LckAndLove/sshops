@@ -14,9 +14,10 @@ import (
 const AppName = "sshops"
 
 var (
-	cfgFile   string
-	appConfig *config.Config
-	rootCmd   = &cobra.Command{
+	cfgFile       string
+	appConfig     *config.Config
+	vaultPassword string
+	rootCmd       = &cobra.Command{
 		Use:   AppName,
 		Short: "SSH 运维命令行工具",
 	}
@@ -33,6 +34,7 @@ func init() {
 	defaultConfigPath := defaultConfigFilePath()
 
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", defaultConfigPath, "配置文件路径")
+	rootCmd.PersistentFlags().StringVar(&vaultPassword, "vault-password", "", "Vault 主密码（避免交互输入）")
 	rootCmd.AddCommand(versionCmd)
 	rootCmd.AddCommand(playbookCmd)
 	cobra.OnInitialize(initConfig)

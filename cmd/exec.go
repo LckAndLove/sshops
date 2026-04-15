@@ -269,17 +269,13 @@ func resolveTaskAuth(cfg *config.Config, h *inventory.Host, cred *vault.Credenti
 	keyPath := ""
 	password := ""
 
-	// KeyPath 优先级：
-	// 1) --key
-	// 2) vault.KeyPath
-	// 3) inventory.Host.KeyPath
-	// 4) config.DefaultKeyPath
+	// KeyPath 优先级：--key > inventory host > vault > config default
 	if userSpecifiedKey {
 		keyPath = strings.TrimSpace(execKey)
-	} else if cred != nil && strings.TrimSpace(cred.KeyPath) != "" {
-		keyPath = strings.TrimSpace(cred.KeyPath)
 	} else if h != nil && strings.TrimSpace(h.KeyPath) != "" {
 		keyPath = strings.TrimSpace(h.KeyPath)
+	} else if cred != nil && strings.TrimSpace(cred.KeyPath) != "" {
+		keyPath = strings.TrimSpace(cred.KeyPath)
 	} else {
 		keyPath = strings.TrimSpace(cfg.DefaultKeyPath)
 		if keyPath == "" {
@@ -287,11 +283,11 @@ func resolveTaskAuth(cfg *config.Config, h *inventory.Host, cred *vault.Credenti
 		}
 	}
 
-	if cred != nil && strings.TrimSpace(cred.Password) != "" {
-		password = strings.TrimSpace(cred.Password)
-	}
-	if password == "" && strings.TrimSpace(execPassword) != "" {
+	// Password 优先级：--password > vault
+	if strings.TrimSpace(execPassword) != "" {
 		password = strings.TrimSpace(execPassword)
+	} else if cred != nil && strings.TrimSpace(cred.Password) != "" {
+		password = strings.TrimSpace(cred.Password)
 	}
 
 	return keyPath, password
@@ -301,29 +297,41 @@ func resolveHostAuth(cfg *config.Config, h *inventory.Host, userSpecifiedKey boo
 	keyPath := ""
 	password := ""
 
-	v := unlockVaultOptional(cfg.VaultPath)
-	var cred *vault.Credential
-	if v != nil {
-		cred = findVaultCredential(v, h.Name)
-		v.Lock()
-	}
-
-	// KeyPath 优先级：--key flag > vault > inventory host > config default
+	// KeyPath 优先级：--key flag > inventory host > vault > config default
 	if userSpecifiedKey {
 		keyPath = strings.TrimSpace(execKey)
-	} else if cred != nil && strings.TrimSpace(cred.KeyPath) != "" {
-		keyPath = strings.TrimSpace(cred.KeyPath)
 	} else if h != nil && strings.TrimSpace(h.KeyPath) != "" {
 		keyPath = strings.TrimSpace(h.KeyPath)
-	} else {
+	}
+
+	// Password 优先级：--password flag > vault
+	if strings.TrimSpace(execPassword) != "" {
+		password = strings.TrimSpace(execPassword)
+	}
+
+	// Only try Vault if no credential found yet (keyPath and password both empty)
+	if keyPath == "" && password == "" {
+		v := unlockVaultOptional(cfg.VaultPath)
+		if v != nil {
+			cred := findVaultCredential(v, h.Name)
+			v.Lock()
+			if cred != nil {
+				if keyPath == "" && strings.TrimSpace(cred.KeyPath) != "" {
+					keyPath = strings.TrimSpace(cred.KeyPath)
+				}
+				if password == "" && strings.TrimSpace(cred.Password) != "" {
+					password = strings.TrimSpace(cred.Password)
+				}
+			}
+		}
+	}
+
+	// Final fallback for keyPath
+	if keyPath == "" {
 		keyPath = strings.TrimSpace(cfg.DefaultKeyPath)
 		if keyPath == "" {
 			keyPath = "id_rsa"
 		}
-	}
-
-	if cred != nil && strings.TrimSpace(cred.Password) != "" {
-		password = strings.TrimSpace(cred.Password)
 	}
 
 	return keyPath, password
@@ -342,11 +350,18 @@ func findVaultCredential(v *vault.Vault, name string) *vault.Credential {
 
 func unlockVaultOptional(path string) *vault.Vault {
 	v := vault.NewVault(path)
-	master, err := readSecret("请输入 Vault 主密码：")
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "⚠ Vault 解锁失败：无法读取主密码，已跳过")
-		return nil
+
+	// Use --vault-password flag if provided, otherwise prompt
+	master := vaultPassword
+	if master == "" {
+		var err error
+		master, err = readSecret("请输入 Vault 主密码：")
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "⚠ Vault 解锁失败：无法读取主密码，已跳过")
+			return nil
+		}
 	}
+
 	if strings.TrimSpace(master) == "" {
 		return nil
 	}
