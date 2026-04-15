@@ -40,7 +40,7 @@ func PrintHostTable(hosts []*inventory.Host) {
 
 		groups := strings.Join(h.Groups, ",")
 		tagText := strings.Join(tags, ",")
-		nameText := "● " + h.Name
+		nameText := "* " + h.Name
 
 		rows = append(rows, []string{
 			nameText,
@@ -80,11 +80,11 @@ func PrintHostTable(hosts []*inventory.Host) {
 	)
 	fmt.Println(drawMid(widths))
 
-	greenDot := color.New(color.FgGreen).Sprint("●")
+	greenDot := color.New(color.FgGreen).Sprint("*")
 	for _, row := range rows {
 		name := row[0]
-		if strings.HasPrefix(name, "● ") {
-			name = greenDot + " " + strings.TrimPrefix(name, "● ")
+		if strings.HasPrefix(name, "* ") {
+			name = greenDot + " " + strings.TrimPrefix(name, "* ")
 		}
 		fmt.Printf("| %s | %s | %s | %s | %s | %s |\n",
 			padRight(name, widths[0]),
@@ -120,9 +120,9 @@ func PrintExecResult(results []runner.Result) {
 			hostIP = r.Host.Host
 		}
 
-		status := "✗"
+		status := "FAIL"
 		if r.ExitCode == 0 {
-			status = "✓"
+			status = "OK"
 			okCount++
 		} else {
 			failedCount++
@@ -162,14 +162,13 @@ func PrintExecResult(results []runner.Result) {
 	red := color.New(color.FgRed)
 	for _, row := range rows {
 		status := row[0]
-		if status == "✓" {
-			status = green.Sprint(status)
-		} else {
-			status = red.Sprint(status)
+		statusColor := green.Sprint(status)
+		if status == "FAIL" {
+			statusColor = red.Sprint(status)
 		}
 
 		fmt.Printf("| %s | %s | %s | %s | %s |\n",
-			padRight(status, widths[0]),
+			padRight(statusColor, widths[0]),
 			padRight(row[1], widths[1]),
 			padRight(row[2], widths[2]),
 			padRight(row[3], widths[3]),
@@ -182,13 +181,13 @@ func PrintExecResult(results []runner.Result) {
 	var summary string
 	if failedCount > 0 {
 		summary = fmt.Sprintf("%s %d/%d 成功   %s %d/%d 失败   总耗时 %s",
-			green.Sprint("✓"), okCount, total,
-			red.Sprint("✗"), failedCount, total,
+			green.Sprint("OK"), okCount, total,
+			red.Sprint("FAIL"), failedCount, total,
 			formatDuration(totalDuration),
 		)
 	} else {
 		summary = fmt.Sprintf("%s %d/%d 成功   总耗时 %s",
-			green.Sprint("✓"), okCount, total,
+			green.Sprint("OK"), okCount, total,
 			formatDuration(totalDuration),
 		)
 	}
@@ -214,11 +213,11 @@ func PrintPlaybookRecap(results map[string]*PlaybookHostResult) {
 }
 
 func PrintAuditLogs(logs []audit.LogEntry) {
-	headers := []string{"时间", "主机", "命令", "退出码", "耗时", "操作人"}
-	fmt.Printf("%s  %s  %s  %s  %s  %s\n", headers[0], headers[1], headers[2], headers[3], headers[4], headers[5])
-	fmt.Println(strings.Repeat("-", 26))
+	fmt.Printf("%-20s %-10s %-20s %-6s %-10s %-10s\n",
+		"时间", "主机", "命令", "退出码", "耗时", "操作人")
+	fmt.Println(strings.Repeat("-", 80))
 	for _, l := range logs {
-		fmt.Printf("%s  %s  %s  %d  %dms  %s\n",
+		fmt.Printf("%-20s %-10s %-20s %-6d %-7d ms %-10s\n",
 			l.CreatedAt.Format("2006-01-02 15:04:05"),
 			l.HostName,
 			l.Command,
