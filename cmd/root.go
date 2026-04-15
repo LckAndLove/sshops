@@ -33,6 +33,7 @@ func init() {
 	defaultConfigPath := defaultConfigFilePath()
 
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", defaultConfigPath, "配置文件路径")
+	rootCmd.AddCommand(versionCmd)
 	cobra.OnInitialize(initConfig)
 }
 

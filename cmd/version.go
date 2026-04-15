@@ -7,37 +7,37 @@ import (
 	"github.com/spf13/cobra"
 )
 
-const Version = "1.0.0"
-
 var (
-	buildVersion = Version
-	buildCommit  = "unknown"
-	buildDate    = "unknown"
+	version   = "dev"
+	commit    = "unknown"
+	buildDate = "unknown"
+	date      = "unknown"
+	goVersion = runtime.Version()
 )
 
 func SetBuildInfo(v, c, d string) {
 	if v != "" {
-		buildVersion = v
+		version = v
 	}
 	if c != "" {
-		buildCommit = c
+		commit = c
 	}
 	if d != "" {
 		buildDate = d
+		date = d
 	}
 }
 
 var versionCmd = &cobra.Command{
 	Use:   "version",
-	Short: "显示版本信息",
+	Short: "Show build version information",
 	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Printf("sshops v%s\n", buildVersion)
-		fmt.Printf("commit: %s\n", buildCommit)
-		fmt.Printf("built:  %s\n", buildDate)
-		fmt.Printf("go:     %s\n", runtime.Version())
+		if date == "unknown" && buildDate != "unknown" {
+			date = buildDate
+		}
+		fmt.Printf("sshops v%s\n", version)
+		fmt.Printf("commit: %s\n", commit)
+		fmt.Printf("built:  %s\n", date)
+		fmt.Printf("go:     %s\n", goVersion)
 	},
-}
-
-func init() {
-	rootCmd.AddCommand(versionCmd)
 }
