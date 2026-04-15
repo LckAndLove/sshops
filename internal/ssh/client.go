@@ -112,14 +112,18 @@ func (c *Client) Connect() error {
 }
 
 func (c *Client) Run(command string) (int, error) {
-	return c.run(command, "")
+	return c.run(command, "", nil, nil)
 }
 
 func (c *Client) RunWithPrefix(command string, prefix string) (int, error) {
-	return c.run(command, prefix)
+	return c.run(command, prefix, nil, nil)
 }
 
-func (c *Client) run(command string, prefix string) (exitCode int, err error) {
+func (c *Client) RunWithPrefixCapture(command string, prefix string, stdoutWriter io.Writer, stderrWriter io.Writer) (int, error) {
+	return c.run(command, prefix, stdoutWriter, stderrWriter)
+}
+
+func (c *Client) run(command string, prefix string, stdoutWriter io.Writer, stderrWriter io.Writer) (exitCode int, err error) {
 	if c.client == nil {
 		return 1, ErrCommandRunFailed
 	}
@@ -155,12 +159,12 @@ func (c *Client) run(command string, prefix string) (exitCode int, err error) {
 
 	go func() {
 		defer wg.Done()
-		streamLines(stdoutPipe, false, prefix)
+		streamLines(stdoutPipe, false, prefix, stdoutWriter)
 	}()
 
 	go func() {
 		defer wg.Done()
-		streamLines(stderrPipe, true, prefix)
+		streamLines(stderrPipe, true, prefix, stderrWriter)
 	}()
 
 	wg.Wait()
@@ -206,13 +210,21 @@ func (c *Client) CloseForce() {
 	c.client = nil
 }
 
-func streamLines(reader io.Reader, isStderr bool, prefix string) {
+func (c *Client) Raw() *gossh.Client {
+	return c.client
+}
+
+func streamLines(reader io.Reader, isStderr bool, prefix string, extraWriter io.Writer) {
 	scanner := bufio.NewScanner(reader)
 	buf := make([]byte, 0, 64*1024)
 	scanner.Buffer(buf, 1024*1024)
 
 	for scanner.Scan() {
-		printLine(scanner.Text(), isStderr, prefix)
+		line := scanner.Text()
+		printLine(line, isStderr, prefix)
+		if extraWriter != nil {
+			_, _ = io.WriteString(extraWriter, line+"\n")
+		}
 	}
 }
 

@@ -7,27 +7,33 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"text/tabwriter"
 	"time"
 
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 
+	"github.com/yourname/sshops/internal/audit"
 	"github.com/yourname/sshops/internal/config"
 	"github.com/yourname/sshops/internal/inventory"
+	"github.com/yourname/sshops/internal/runner"
 	sshclient "github.com/yourname/sshops/internal/ssh"
 	"github.com/yourname/sshops/internal/vault"
 )
 
 var (
-	execHost     string
-	execPort     int
-	execUser     string
-	execKey      string
-	execPassword string
-	execTimeout  int
-	execProxy    string
-	execGroup    string
-	execTag      string
+	execHost        string
+	execPort        int
+	execUser        string
+	execKey         string
+	execPassword    string
+	execTimeout     int
+	execProxy       string
+	execGroup       string
+	execTag         string
+	execConcurrency int
+	execRetry       int
+	execLogLimit    int
 )
 
 var execCmd = &cobra.Command{
@@ -44,6 +50,8 @@ var execCmd = &cobra.Command{
 
 		cfg := currentConfig()
 		applyExecDefaults(cmd, cfg)
+		keyFlag := cmd.Flags().Lookup("key")
+		userSpecifiedKey := keyFlag != nil && keyFlag.Changed
 
 		if strings.TrimSpace(execHost) != "" {
 			execSingleHost(cmd, cfg, command)
@@ -56,12 +64,47 @@ var execCmd = &cobra.Command{
 			os.Exit(1)
 		}
 
-		execBatchHosts(cmd, cfg, command)
+		execBatchHosts(cfg, command, userSpecifiedKey)
+	},
+}
+
+var execLogsCmd = &cobra.Command{
+	Use:   "logs",
+	Short: "查看审计日志",
+	Run: func(cmd *cobra.Command, args []string) {
+		cfg := currentConfig()
+		logger, err := audit.NewLogger(cfg.AuditDBPath)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "✗ 审计日志初始化失败")
+			os.Exit(1)
+		}
+		defer logger.Close()
+
+		logs, err := logger.Query(execLogLimit)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "✗ 查询审计日志失败")
+			os.Exit(1)
+		}
+
+		w := tabwriter.NewWriter(os.Stdout, 2, 4, 2, ' ', 0)
+		fmt.Fprintln(w, "TIME\tHOST\tCOMMAND\tEXIT\tDURATION\tOPERATOR")
+		for _, item := range logs {
+			fmt.Fprintf(w, "%s\t%s\t%s\t%d\t%s\t%s\n",
+				item.CreatedAt.Format("2006-01-02 15:04:05"),
+				item.HostName,
+				item.Command,
+				item.ExitCode,
+				fmt.Sprintf("%dms", item.DurationMS),
+				item.Operator,
+			)
+		}
+		_ = w.Flush()
 	},
 }
 
 func init() {
 	rootCmd.AddCommand(execCmd)
+	execCmd.AddCommand(execLogsCmd)
 
 	execCmd.Flags().StringVarP(&execHost, "host", "H", "", "目标主机 IP 或域名")
 	execCmd.Flags().IntVarP(&execPort, "port", "p", 0, "SSH 端口")
@@ -72,6 +115,10 @@ func init() {
 	execCmd.Flags().StringVarP(&execProxy, "proxy", "P", "", "跳板机，格式 user@host:port，多跳用逗号分隔")
 	execCmd.Flags().StringVarP(&execGroup, "group", "g", "", "按分组批量执行")
 	execCmd.Flags().StringVar(&execTag, "tag", "", "按标签过滤批量执行（配合 --group 使用）")
+	execCmd.Flags().IntVarP(&execConcurrency, "concurrency", "c", 10, "并发数")
+	execCmd.Flags().IntVar(&execRetry, "retry", 0, "失败重试次数")
+
+	execLogsCmd.Flags().IntVar(&execLogLimit, "limit", 20, "显示最近 N 条审计日志")
 }
 
 func execSingleHost(cmd *cobra.Command, cfg *config.Config, command string) {
@@ -122,7 +169,7 @@ func execSingleHost(cmd *cobra.Command, cfg *config.Config, command string) {
 	os.Exit(exitCode)
 }
 
-func execBatchHosts(cmd *cobra.Command, cfg *config.Config, command string) {
+func execBatchHosts(cfg *config.Config, command string, userSpecifiedKey bool) {
 	inv, err := inventory.Load(cfg.InventoryPath)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "✗ 加载主机清单失败：请检查 inventory 文件格式")
@@ -140,113 +187,101 @@ func execBatchHosts(cmd *cobra.Command, cfg *config.Config, command string) {
 		defer v.Lock()
 	}
 
-	total := len(hosts)
-	success := 0
-	failed := 0
-	startAll := time.Now()
-
+	tasks := make([]runner.Task, 0, len(hosts))
 	for _, h := range hosts {
 		if h == nil {
 			continue
 		}
 
-		fmt.Printf("--- [%s] %s ---\n", h.Name, h.Host)
+		keyPath, password := resolveTaskAuth(cfg, h, findVaultCredential(v, h.Name), userSpecifiedKey)
+		tasks = append(tasks, runner.Task{
+			Host:     h,
+			Command:  command,
+			KeyPath:  keyPath,
+			Password: password,
+		})
+	}
 
-		hostPort := h.Port
-		if hostPort <= 0 {
-			hostPort = cfg.DefaultPort
-		}
-		hostUser := strings.TrimSpace(h.User)
-		if hostUser == "" {
-			hostUser = cfg.DefaultUser
-		}
-		hostTimeout := execTimeout
-		if hostTimeout <= 0 {
-			hostTimeout = cfg.ConnectTimeout
-		}
+	display := runner.NewDisplay(hosts)
+	display.Start()
 
-		cred := findVaultCredential(v, h.Name)
-		keyPath, password := resolveBatchAuth(cmd, cfg, h, cred)
-		proxyChain := strings.TrimSpace(h.ProxyChain)
-		if cmd.Flags().Changed("proxy") {
-			proxyChain = strings.TrimSpace(execProxy)
-		}
+	logger, logErr := audit.NewLogger(cfg.AuditDBPath)
+	if logErr != nil {
+		fmt.Fprintln(os.Stderr, "⚠ 审计日志初始化失败：已跳过日志记录")
+	}
+	if logger != nil {
+		defer logger.Close()
+	}
 
-		client := sshclient.NewClient(h.Host, hostPort, hostUser, hostTimeout)
-		proxies, proxyErr := parseProxyChain(proxyChain, hostUser, keyPath, password)
-		if proxyErr != nil {
-			fmt.Fprintf(os.Stderr, "%s\n", proxyErr.Error())
-			failed++
-			continue
-		}
-		client.Proxies = proxies
+	r := runner.NewRunner(execConcurrency, execTimeout, execRetry)
+	r.Progress = display
+	r.Audit = logger
 
-		authErr := configureClientAuth(client, keyPath, password)
-		if authErr != nil {
-			fmt.Fprintf(os.Stderr, "%s\n", humanizeError(authErr, h.Host, hostPort, hostTimeout, keyPath))
-			failed++
-			continue
-		}
+	startAll := time.Now()
+	results := r.Run(tasks)
+	display.Stop()
+	duration := time.Since(startAll).Round(100 * time.Millisecond)
 
-		if err := client.Connect(); err != nil {
-			fmt.Fprintf(os.Stderr, "%s\n", humanizeError(err, h.Host, hostPort, hostTimeout, keyPath))
-			failed++
-			continue
-		}
-
-		exitCode, runErr := client.RunWithPrefix(command, h.Name)
-		if runErr != nil {
-			fmt.Fprintf(os.Stderr, "%s\n", humanizeError(runErr, h.Host, hostPort, hostTimeout, keyPath))
-			failed++
-			continue
-		}
-		if exitCode == 0 {
+	total := len(results)
+	success := 0
+	failed := 0
+	for _, res := range results {
+		if res.Error == nil && res.ExitCode == 0 {
 			success++
 		} else {
 			failed++
 		}
 	}
 
-	duration := time.Since(startAll).Round(100 * time.Millisecond)
 	if failed == 0 {
 		fmt.Printf("✓ %d/%d 成功  耗时 %s\n", success, total, duration)
 		os.Exit(0)
 	}
 
 	fmt.Printf("✓ %d/%d 成功  ✗ %d/%d 失败  耗时 %s\n", success, total, failed, total, duration)
+	for _, res := range results {
+		if res.Error == nil && res.ExitCode == 0 {
+			continue
+		}
+		if res.Host == nil {
+			continue
+		}
+		errText := humanizeError(res.Error, res.Host.Host, res.Host.Port, execTimeout, "")
+		fmt.Printf("✗ %s (%s): %s\n", res.Host.Name, res.Host.Host, strings.TrimPrefix(errText, "✗ "))
+	}
 	os.Exit(1)
 }
 
-func resolveBatchAuth(cmd *cobra.Command, cfg *config.Config, h *inventory.Host, cred *vault.Credential) (keyPath string, password string) {
-	if cmd.Flags().Changed("key") && strings.TrimSpace(execKey) != "" {
+func resolveTaskAuth(cfg *config.Config, h *inventory.Host, cred *vault.Credential, userSpecifiedKey bool) (string, string) {
+	keyPath := ""
+	password := ""
+
+	// KeyPath 优先级：
+	// 1) --key
+	// 2) vault.KeyPath
+	// 3) inventory.Host.KeyPath
+	// 4) config.DefaultKeyPath
+	if userSpecifiedKey {
 		keyPath = strings.TrimSpace(execKey)
-	} else {
+	} else if cred != nil && strings.TrimSpace(cred.KeyPath) != "" {
+		keyPath = strings.TrimSpace(cred.KeyPath)
+	} else if h != nil && strings.TrimSpace(h.KeyPath) != "" {
 		keyPath = strings.TrimSpace(h.KeyPath)
-		if keyPath == "" && cred != nil && strings.TrimSpace(cred.KeyPath) != "" {
-			keyPath = strings.TrimSpace(cred.KeyPath)
+	} else {
+		keyPath = strings.TrimSpace(cfg.DefaultKeyPath)
+		if keyPath == "" {
+			keyPath = "id_rsa"
 		}
 	}
 
-	if cmd.Flags().Changed("password") && strings.TrimSpace(execPassword) != "" {
-		password = strings.TrimSpace(execPassword)
-	} else if cred != nil && keyPath == "" && strings.TrimSpace(cred.Password) != "" {
+	if cred != nil && strings.TrimSpace(cred.Password) != "" {
 		password = strings.TrimSpace(cred.Password)
 	}
-
-	if keyPath == "" && password == "" {
-		keyPath = cfg.DefaultKeyPath
+	if password == "" && strings.TrimSpace(execPassword) != "" {
+		password = strings.TrimSpace(execPassword)
 	}
+
 	return keyPath, password
-}
-
-func configureClientAuth(client *sshclient.Client, keyPath string, password string) error {
-	if strings.TrimSpace(keyPath) != "" {
-		return client.WithKey(keyPath)
-	}
-	if strings.TrimSpace(password) != "" {
-		return client.WithPassword(password)
-	}
-	return sshclient.ErrAuthFailed
 }
 
 func findVaultCredential(v *vault.Vault, name string) *vault.Credential {
@@ -303,6 +338,9 @@ func applyExecDefaults(cmd *cobra.Command, cfg *config.Config) {
 }
 
 func humanizeError(err error, host string, port int, timeout int, keyPath string) string {
+	if err == nil {
+		return ""
+	}
 	if hopErr, ok := sshclient.IsProxyHopError(err); ok {
 		return fmt.Sprintf("✗ 跳板机连接失败（第%d跳 %s）：%s", hopErr.Hop, hopErr.Node, proxyReasonToChinese(hopErr.Reason))
 	}
@@ -323,7 +361,7 @@ func humanizeError(err error, host string, port int, timeout int, keyPath string
 	case errors.Is(err, sshclient.ErrConnectFailed):
 		return "✗ 连接失败：请检查网络连通性和主机地址配置"
 	default:
-		return "✗ 操作失败：请检查网络、认证信息和主机配置"
+		return "✗ " + err.Error()
 	}
 }
 

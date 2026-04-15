@@ -15,6 +15,7 @@ type Config struct {
 	ConnectTimeout int    `yaml:"connect_timeout"`
 	InventoryPath  string `yaml:"inventory_path"`
 	VaultPath      string `yaml:"vault_path"`
+	AuditDBPath    string `yaml:"audit_db_path"`
 }
 
 func Default() *Config {
@@ -25,6 +26,7 @@ func Default() *Config {
 		ConnectTimeout: 30,
 		InventoryPath:  defaultInventoryPath(),
 		VaultPath:      defaultVaultPath(),
+		AuditDBPath:    defaultAuditDBPath(),
 	}
 }
 
@@ -60,6 +62,9 @@ func Load(path string) (*Config, error) {
 	}
 	if cfg.VaultPath == "" {
 		cfg.VaultPath = defaultVaultPath()
+	}
+	if cfg.AuditDBPath == "" {
+		cfg.AuditDBPath = defaultAuditDBPath()
 	}
 
 	return cfg, nil
@@ -127,4 +132,20 @@ func defaultVaultPath() string {
 		return filepath.Join(".", ".sshops", "vault.enc")
 	}
 	return filepath.Join(home, ".sshops", "vault.enc")
+}
+
+func defaultAuditDBPath() string {
+	if runtime.GOOS == "windows" {
+		appData := os.Getenv("APPDATA")
+		if appData == "" {
+			appData = "."
+		}
+		return filepath.Join(appData, "sshops", "audit.db")
+	}
+
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return filepath.Join(".", ".sshops", "audit.db")
+	}
+	return filepath.Join(home, ".sshops", "audit.db")
 }
