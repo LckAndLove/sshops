@@ -18,8 +18,22 @@ type PlaybookHostResult struct {
 	Duration    time.Duration
 }
 
+// displayWidth returns the terminal display width of a string.
+// Chinese/fullwidth characters count as 2 columns, ASCII as 1.
+func displayWidth(s string) int {
+	width := 0
+	for _, r := range s {
+		if r > 0x7F {
+			width += 2
+		} else {
+			width += 1
+		}
+	}
+	return width
+}
+
 func PrintHostTable(hosts []*inventory.Host) {
-	headers := []string{"名称", "主机", "端口", "用户", "分组", "标签"}
+	headers := []string{"NAME", "HOST", "PORT", "USER", "GROUPS", "TAGS"}
 	rows := make([][]string, 0, len(hosts))
 	nameCol := make([]string, 0, len(hosts)+1)
 	hostCol := []string{headers[1]}
@@ -99,7 +113,7 @@ func PrintHostTable(hosts []*inventory.Host) {
 }
 
 func PrintExecResult(results []runner.Result) {
-	headers := []string{"status", "host name", "IP", "exit code", "duration"}
+	headers := []string{"STATUS", "HOST NAME", "IP", "EXIT", "DUR"}
 	rows := make([][]string, 0, len(results))
 
 	statusCol := []string{headers[0]}
@@ -180,13 +194,13 @@ func PrintExecResult(results []runner.Result) {
 	total := len(results)
 	var summary string
 	if failedCount > 0 {
-		summary = fmt.Sprintf("%s %d/%d 成功   %s %d/%d 失败   总耗时 %s",
+		summary = fmt.Sprintf("%s %d/%d OK   %s %d/%d FAIL   total %s",
 			green.Sprint("OK"), okCount, total,
 			red.Sprint("FAIL"), failedCount, total,
 			formatDuration(totalDuration),
 		)
 	} else {
-		summary = fmt.Sprintf("%s %d/%d 成功   总耗时 %s",
+		summary = fmt.Sprintf("%s %d/%d OK   total %s",
 			green.Sprint("OK"), okCount, total,
 			formatDuration(totalDuration),
 		)
@@ -208,35 +222,35 @@ func PrintPlaybookRecap(results map[string]*PlaybookHostResult) {
 		if strings.TrimSpace(hostName) == "" {
 			hostName = host
 		}
-		fmt.Printf("  %s   ok=%d   failed=%d   duration=%.2fs\n", hostName, r.OkCount, r.FailedCount, r.Duration.Seconds())
+		fmt.Printf("  %s   ok=%d   failed=%d   dur=%.2fs\n", hostName, r.OkCount, r.FailedCount, r.Duration.Seconds())
 	}
 }
 
 func PrintAuditLogs(logs []audit.LogEntry) {
-	fmt.Printf("%-20s %-10s %-20s %-6s %-10s %-10s\n",
-		"时间", "主机", "命令", "退出码", "耗时", "操作人")
+	fmt.Printf("%-20s %-12s %-20s %-6s %-10s %-10s\n",
+		"TIME", "HOST", "CMD", "EXIT", "DUR", "BY")
 	fmt.Println(strings.Repeat("-", 80))
 	for _, l := range logs {
-		fmt.Printf("%-20s %-10s %-20s %-6d %-7d ms %-10s\n",
+		fmt.Printf("%-20s %-12s %-20s %-6d %-10s %-10s\n",
 			l.CreatedAt.Format("2006-01-02 15:04:05"),
 			l.HostName,
 			l.Command,
 			l.ExitCode,
-			l.DurationMS,
+			fmt.Sprintf("%dms", l.DurationMS),
 			l.Operator,
 		)
 	}
 }
 
 func PrintDiagnosisReport(host string, symptom string, data map[string]string) {
-	title := fmt.Sprintf("诊断报告：%s @ %s", host, symptom)
-	width := len([]rune(title))
+	title := fmt.Sprintf("Diagnosis: %s @ %s", host, symptom)
+	width := displayWidth(title)
 	for k, v := range data {
-		if w := len([]rune("[ "+k+" ]")); w > width {
+		if w := displayWidth("[ "+k+" ]"); w > width {
 			width = w
 		}
 		for _, line := range strings.Split(v, "\n") {
-			if w := len([]rune(line)); w > width {
+			if w := displayWidth(line); w > width {
 				width = w
 			}
 		}
@@ -257,7 +271,7 @@ func PrintDiagnosisReport(host string, symptom string, data map[string]string) {
 
 func PrintMetricsCard(host string, metrics map[string]string) {
 	bodyWidth := 49
-	topRight := bodyWidth - 4 - len([]rune(host))
+	topRight := bodyWidth - 4 - displayWidth(host)
 	if topRight < 1 {
 		topRight = 1
 	}
@@ -301,7 +315,7 @@ func makeBar(pct float64) string {
 		filled = 0
 	}
 
-	bar := strings.Repeat("█", filled) + strings.Repeat("░", 16-filled)
+	bar := strings.Repeat("#", filled) + strings.Repeat("-", 16-filled)
 
 	if pct <= 60 {
 		return color.New(color.FgGreen).Sprint(bar)
@@ -315,7 +329,7 @@ func makeBar(pct float64) string {
 func maxWidth(items []string) int {
 	max := 0
 	for _, s := range items {
-		w := len([]rune(s))
+		w := displayWidth(s)
 		if w > max {
 			max = w
 		}
@@ -324,11 +338,11 @@ func maxWidth(items []string) int {
 }
 
 func padRight(s string, width int) string {
-	l := len([]rune(s))
-	if l >= width {
+	dw := displayWidth(s)
+	if dw >= width {
 		return s
 	}
-	return s + strings.Repeat(" ", width-l)
+	return s + strings.Repeat(" ", width-dw)
 }
 
 func drawTop(widths []int) string {
