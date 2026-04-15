@@ -4,10 +4,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/yourname/sshops/internal/config"
 	"github.com/yourname/sshops/internal/inventory"
+	"github.com/yourname/sshops/internal/playbook"
 	"github.com/yourname/sshops/internal/vault"
 )
 
@@ -58,6 +60,10 @@ type toolContent struct {
 	Text string `json:"text"`
 }
 
+type resourcesReadParams struct {
+	URI string `json:"uri"`
+}
+
 func NewServer(inv *inventory.Inventory, v *vault.Vault, cfg *config.Config) *Server {
 	s := &Server{inventory: inv, vault: v, config: cfg}
 	s.tools = s.buildToolDefs()
@@ -72,6 +78,10 @@ func (s *Server) Handle(req *JSONRPCRequest) *JSONRPCResponse {
 	switch req.Method {
 	case "initialize":
 		return s.handleInitialize(req)
+	case "resources/list":
+		return s.handleResourcesList(req)
+	case "resources/read":
+		return s.handleResourcesRead(req)
 	case "tools/list":
 		return s.handleToolsList(req)
 	case "tools/call":
@@ -93,11 +103,54 @@ func (s *Server) handleInitialize(req *JSONRPCRequest) *JSONRPCResponse {
 		ID:      req.ID,
 		Result: map[string]interface{}{
 			"protocolVersion": "2024-11-05",
-			"capabilities":    map[string]interface{}{"tools": map[string]interface{}{}},
+			"capabilities": map[string]interface{}{
+				"tools":     map[string]interface{}{},
+				"resources": map[string]interface{}{},
+			},
 			"serverInfo": map[string]interface{}{
 				"name":    "sshops",
 				"version": "1.0.0",
 			},
+		},
+	}
+}
+
+func (s *Server) handleResourcesList(req *JSONRPCRequest) *JSONRPCResponse {
+	return &JSONRPCResponse{
+		JSONRPC: "2.0",
+		ID:      req.ID,
+		Result: map[string]interface{}{
+			"resources": []map[string]interface{}{
+				{
+					"uri":         "sshops://context",
+					"name":        "sshops 运维上下文",
+					"description": "当前环境信息，帮助 AI 更好地理解运维场景",
+					"mimeType":    "text/plain",
+				},
+			},
+		},
+	}
+}
+
+func (s *Server) handleResourcesRead(req *JSONRPCRequest) *JSONRPCResponse {
+	var params resourcesReadParams
+	if len(req.Params) == 0 {
+		return &JSONRPCResponse{JSONRPC: "2.0", ID: req.ID, Error: &RPCError{Code: -32602, Message: "Invalid params"}}
+	}
+	if err := json.Unmarshal(req.Params, &params); err != nil {
+		return &JSONRPCResponse{JSONRPC: "2.0", ID: req.ID, Error: &RPCError{Code: -32602, Message: "Invalid params"}}
+	}
+	if params.URI != "sshops://context" {
+		return &JSONRPCResponse{JSONRPC: "2.0", ID: req.ID, Error: &RPCError{Code: -32602, Message: "Unsupported resource uri"}}
+	}
+
+	return &JSONRPCResponse{
+		JSONRPC: "2.0",
+		ID:      req.ID,
+		Result: map[string]interface{}{
+			"uri":      "sshops://context",
+			"mimeType": "text/plain",
+			"content":  s.buildOpsContextMarkdown(),
 		},
 	}
 }
@@ -206,4 +259,75 @@ func containsAny(text string, keywords ...string) bool {
 		}
 	}
 	return false
+}
+
+func (s *Server) buildOpsContextMarkdown() string {
+	var b strings.Builder
+
+	b.WriteString("# sshops 运维助手上下文\n\n")
+
+	b.WriteString("## 当前主机清单\n")
+	hosts := []*inventory.Host{}
+	if s.inventory != nil {
+		hosts = s.inventory.List()
+	}
+	if len(hosts) == 0 {
+		b.WriteString("- 暂无主机\n\n")
+	} else {
+		for _, h := range hosts {
+			if h == nil {
+				continue
+			}
+			groups := "无"
+			if len(h.Groups) > 0 {
+				g := append([]string(nil), h.Groups...)
+				sort.Strings(g)
+				groups = strings.Join(g, ", ")
+			}
+			tags := "无"
+			if len(h.Tags) > 0 {
+				keys := make([]string, 0, len(h.Tags))
+				for k := range h.Tags {
+					keys = append(keys, k)
+				}
+				sort.Strings(keys)
+				tagParts := make([]string, 0, len(keys))
+				for _, k := range keys {
+					tagParts = append(tagParts, fmt.Sprintf("%s=%s", k, h.Tags[k]))
+				}
+				tags = strings.Join(tagParts, ", ")
+			}
+			b.WriteString(fmt.Sprintf("- 名称: %s | IP: %s | 分组: %s | 标签: %s\n", h.Name, h.Host, groups, tags))
+		}
+		b.WriteString("\n")
+	}
+
+	b.WriteString("## 可用工具说明\n")
+	if len(s.tools) == 0 {
+		b.WriteString("- 暂无可用工具\n\n")
+	} else {
+		for _, t := range s.tools {
+			b.WriteString(fmt.Sprintf("- `%s`: %s\n", t.Name, t.Description))
+		}
+		b.WriteString("\n")
+	}
+
+	b.WriteString("## 内置 Playbook\n")
+	playbooks := playbook.BuiltinPlaybookFiles()
+	if len(playbooks) == 0 {
+		b.WriteString("- 暂无内置 Playbook\n\n")
+	} else {
+		for _, pb := range playbooks {
+			b.WriteString(fmt.Sprintf("- %s\n", pb))
+		}
+		b.WriteString("\n")
+	}
+
+	b.WriteString("## 使用建议\n")
+	b.WriteString("- 先读取主机清单，明确目标主机和分组后再执行操作。\n")
+	b.WriteString("- 优先使用只读工具进行诊断，再执行修改类命令。\n")
+	b.WriteString("- 批量操作前先在单台主机验证命令，避免扩大故障影响。\n")
+	b.WriteString("- 执行 Playbook 前确认变量输入和目标范围，确保变更可控。\n")
+
+	return b.String()
 }
