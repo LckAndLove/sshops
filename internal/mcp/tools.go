@@ -15,6 +15,7 @@ import (
 
 	"github.com/pkg/sftp"
 
+	"github.com/yourname/sshops/internal/display"
 	"github.com/yourname/sshops/internal/inventory"
 	"github.com/yourname/sshops/internal/playbook"
 	execrunner "github.com/yourname/sshops/internal/runner"
@@ -347,15 +348,21 @@ func (s *Server) toolGetMetrics(args map[string]interface{}) (string, error) {
 		values[item.label] = out
 	}
 
-	return fmt.Sprintf("=== 系统指标 %s (%s) ===\nCPU 使用率:  %s\n内存:        %s\n磁盘:\n%s\n负载:       %s\n进程数:     %s",
-		h.Name,
-		h.Host,
-		extractStdout(values["CPU"]),
-		extractStdout(values["MEM"]),
-		extractStdout(values["DISK"]),
-		extractStdout(values["LOAD"]),
-		extractStdout(values["PROC"]),
-	), nil
+	metrics := map[string]string{
+		"cpu":    extractStdout(values["CPU"]),
+		"memory": extractStdout(values["MEM"]),
+		"disk":   extractStdout(values["DISK"]),
+		"load":   extractStdout(values["LOAD"]),
+		"proc":   extractStdout(values["PROC"]),
+	}
+
+	var out strings.Builder
+	if err := captureDisplayOutput(&out, func() {
+		display.PrintMetricsCard(h.Name, metrics)
+	}); err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(out.String()), nil
 }
 
 func (s *Server) toolRunPlaybook(args map[string]interface{}) (string, error) {
@@ -694,6 +701,36 @@ func runCommandSilent(client *sshclient.Client, command string, timeout int) (st
 		client.CloseForce()
 		return outBuf.String(), errBuf.String(), 1, duration, fmt.Errorf("连接或执行超时：%ds", timeout)
 	}
+}
+
+func captureDisplayOutput(builder *strings.Builder, fn func()) error {
+	if builder == nil {
+		return errors.New("builder 不能为空")
+	}
+	if fn == nil {
+		return nil
+	}
+
+	oldStdout := os.Stdout
+	readPipe, writePipe, err := os.Pipe()
+	if err != nil {
+		return err
+	}
+
+	copyDone := make(chan error, 1)
+	go func() {
+		_, copyErr := io.Copy(builder, readPipe)
+		copyDone <- copyErr
+	}()
+
+	os.Stdout = writePipe
+	fn()
+	_ = writePipe.Close()
+	os.Stdout = oldStdout
+
+	copyErr := <-copyDone
+	_ = readPipe.Close()
+	return copyErr
 }
 
 func getStringArg(args map[string]interface{}, key string) string {

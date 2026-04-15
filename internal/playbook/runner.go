@@ -11,6 +11,7 @@ import (
 	"text/template"
 	"time"
 
+	"github.com/yourname/sshops/internal/display"
 	"github.com/yourname/sshops/internal/inventory"
 	execrunner "github.com/yourname/sshops/internal/runner"
 )
@@ -77,8 +78,7 @@ func (r *PlaybookRunner) Run(pb *Playbook) error {
 
 	for i := range pb.Tasks {
 		task := pb.Tasks[i]
-		fmt.Fprintf(out, "\nTASK [%s]\n", task.Name)
-		fmt.Fprintln(out, "----------------------------------------")
+		display.PrintPlaybookTask(task.Name, len(pb.Tasks), i+1)
 
 		command, err := Render(pb, &task, finalVars)
 		if err != nil {
@@ -249,8 +249,8 @@ func renderExpressionPart(part string, vars map[string]string, register map[stri
 	return strings.Trim(strings.TrimSpace(out.String()), `"'`), nil
 }
 
-func printRecap(out io.Writer, hosts []*inventory.Host, recap map[string]*hostRecap) {
-	fmt.Fprintln(out, "\nPLAY RECAP")
+func printRecap(_ io.Writer, hosts []*inventory.Host, recap map[string]*hostRecap) {
+	results := make(map[string]*display.PlaybookHostResult, len(hosts))
 	for _, h := range hosts {
 		if h == nil {
 			continue
@@ -259,6 +259,12 @@ func printRecap(out io.Writer, hosts []*inventory.Host, recap map[string]*hostRe
 		if item == nil {
 			item = &hostRecap{}
 		}
-		fmt.Fprintf(out, "%s  ok=%d  failed=%d  duration=%.1fs\n", h.Name, item.OK, item.Failed, item.Duration.Seconds())
+		results[h.Name] = &display.PlaybookHostResult{
+			HostName:    h.Name,
+			OkCount:     item.OK,
+			FailedCount: item.Failed,
+			Duration:    item.Duration,
+		}
 	}
+	display.PrintPlaybookRecap(results)
 }

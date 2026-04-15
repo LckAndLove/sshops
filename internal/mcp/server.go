@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/yourname/sshops/internal/config"
+	"github.com/yourname/sshops/internal/display"
 	"github.com/yourname/sshops/internal/inventory"
 	"github.com/yourname/sshops/internal/playbook"
 	"github.com/yourname/sshops/internal/vault"
@@ -237,6 +238,7 @@ func (s *Server) toolDiagnose(args map[string]interface{}) (string, error) {
 	}
 
 	sections := make([]string, 0, len(diagnoseCmds))
+	diagnosisData := make(map[string]string, len(diagnoseCmds))
 	for _, item := range diagnoseCmds {
 		out, err := s.toolExecCommand(map[string]interface{}{
 			"host":    hostArg,
@@ -246,10 +248,24 @@ func (s *Server) toolDiagnose(args map[string]interface{}) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		sections = append(sections, fmt.Sprintf("[%s]\n%s", item.label, extractStdout(out)))
+		stdout := extractStdout(out)
+		sections = append(sections, fmt.Sprintf("[%s]\n%s", item.label, stdout))
+		diagnosisData[item.label] = stdout
 	}
 
-	return fmt.Sprintf("=== 智能诊断报告 ===\nhost: %s\nsymptom: %s\n\n%s", hostArg, symptom, strings.Join(sections, "\n\n")), nil
+	var displayOut strings.Builder
+	if err := captureDisplayOutput(&displayOut, func() {
+		display.PrintDiagnosisReport(hostArg, symptom, diagnosisData)
+	}); err != nil {
+		return "", err
+	}
+
+	report := fmt.Sprintf("=== 智能诊断报告 ===\nhost: %s\nsymptom: %s\n\n%s", hostArg, symptom, strings.Join(sections, "\n\n"))
+	rendered := strings.TrimSpace(displayOut.String())
+	if rendered != "" {
+		report += "\n\n" + rendered
+	}
+	return report, nil
 }
 
 func containsAny(text string, keywords ...string) bool {

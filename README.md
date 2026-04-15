@@ -262,24 +262,6 @@ This project is licensed under the MIT License.
 
 Claude 会自动选择合适的 Playbook 或调用 batch_exec 执行。
 
-## Web UI 控制台
-
-启动 Web 界面：
-
-  sshops web serve --port 8080 --open
-
-浏览器访问 http://localhost:8080
-
-功能：
-- 主机列表与实时状态
-- 命令执行与输出显示
-- Playbook 可视化运行
-- 审计日志查询
-
-加密访问（可选）：
-
-  sshops web serve --port 8080 --password yourpassword
-
 ## AI 智能诊断
 
 在 Claude Code 中：
@@ -290,3 +272,19 @@ Claude 会自动选择合适的 Playbook 或调用 batch_exec 执行。
 
   "帮我检查所有服务器的健康状态"
   → 自动调用 run_playbook check-health
+
+## 命令行输出
+
+新版命令行统一使用结构化输出模块，便于人工阅读与 AI 解析。
+
+主机清单（Host Inventory）：
+- `sshops inventory list` 以表格展示主机名、地址、端口、用户、分组和标签。
+
+服务器指标（Server Metrics）：
+- `get_metrics` 工具返回指标卡片，直观展示 CPU、内存、磁盘及附加系统信息。
+
+批量执行汇总（Batch Execution Summary）：
+- 多主机执行命令后输出统一结果表，包含状态、主机、退出码与耗时，并附带成功/失败汇总。
+
+审计日志（Audit Logs）：
+- `sshops exec logs` 使用统一日志展示格式输出时间、主机、命令、退出码、耗时和操作人。

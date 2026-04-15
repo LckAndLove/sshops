@@ -7,11 +7,11 @@ import (
 	"sort"
 	"strings"
 	"syscall"
-	"text/tabwriter"
 
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
+	"github.com/yourname/sshops/internal/display"
 	"github.com/yourname/sshops/internal/inventory"
 	"github.com/yourname/sshops/internal/vault"
 )
@@ -114,15 +114,7 @@ var inventoryListCmd = &cobra.Command{
 
 		hosts := inv.List()
 		sort.Slice(hosts, func(i, j int) bool { return hosts[i].Name < hosts[j].Name })
-
-		w := tabwriter.NewWriter(os.Stdout, 2, 4, 2, ' ', 0)
-		fmt.Fprintln(w, "NAME\tHOST\tPORT\tUSER\tGROUPS\tTAGS")
-		for _, h := range hosts {
-			groups := strings.Join(h.Groups, ",")
-			tags := tagsToText(h.Tags)
-			fmt.Fprintf(w, "%s\t%s\t%d\t%s\t%s\t%s\n", h.Name, h.Host, h.Port, h.User, groups, tags)
-		}
-		_ = w.Flush()
+		display.PrintHostTable(hosts)
 	},
 }
 

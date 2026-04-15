@@ -7,7 +7,6 @@ import (
 	"os"
 	"strconv"
 	"strings"
-	"text/tabwriter"
 	"time"
 
 	"github.com/fatih/color"
@@ -15,6 +14,7 @@ import (
 
 	"github.com/yourname/sshops/internal/audit"
 	"github.com/yourname/sshops/internal/config"
+	disp "github.com/yourname/sshops/internal/display"
 	"github.com/yourname/sshops/internal/inventory"
 	"github.com/yourname/sshops/internal/runner"
 	sshclient "github.com/yourname/sshops/internal/ssh"
@@ -86,19 +86,7 @@ var execLogsCmd = &cobra.Command{
 			os.Exit(1)
 		}
 
-		w := tabwriter.NewWriter(os.Stdout, 2, 4, 2, ' ', 0)
-		fmt.Fprintln(w, "TIME\tHOST\tCOMMAND\tEXIT\tDURATION\tOPERATOR")
-		for _, item := range logs {
-			fmt.Fprintf(w, "%s\t%s\t%s\t%d\t%s\t%s\n",
-				item.CreatedAt.Format("2006-01-02 15:04:05"),
-				item.HostName,
-				item.Command,
-				item.ExitCode,
-				fmt.Sprintf("%dms", item.DurationMS),
-				item.Operator,
-			)
-		}
-		_ = w.Flush()
+		disp.PrintAuditLogs(logs)
 	},
 }
 
@@ -202,8 +190,8 @@ func execBatchHosts(cfg *config.Config, command string, userSpecifiedKey bool) {
 		})
 	}
 
-	display := runner.NewDisplay(hosts)
-	display.Start()
+	progress := runner.NewDisplay(hosts)
+	progress.Start()
 
 	logger, logErr := audit.NewLogger(cfg.AuditDBPath)
 	if logErr != nil {
@@ -214,40 +202,22 @@ func execBatchHosts(cfg *config.Config, command string, userSpecifiedKey bool) {
 	}
 
 	r := runner.NewRunner(execConcurrency, execTimeout, execRetry)
-	r.Progress = display
+	r.Progress = progress
 	r.Audit = logger
 
-	startAll := time.Now()
 	results := r.Run(tasks)
-	display.Stop()
-	duration := time.Since(startAll).Round(100 * time.Millisecond)
+	progress.Stop()
 
-	total := len(results)
-	success := 0
 	failed := 0
 	for _, res := range results {
-		if res.Error == nil && res.ExitCode == 0 {
-			success++
-		} else {
+		if res.Error != nil || res.ExitCode != 0 {
 			failed++
 		}
 	}
 
+	disp.PrintExecResult(results)
 	if failed == 0 {
-		fmt.Printf("✓ %d/%d 成功  耗时 %s\n", success, total, duration)
 		os.Exit(0)
-	}
-
-	fmt.Printf("✓ %d/%d 成功  ✗ %d/%d 失败  耗时 %s\n", success, total, failed, total, duration)
-	for _, res := range results {
-		if res.Error == nil && res.ExitCode == 0 {
-			continue
-		}
-		if res.Host == nil {
-			continue
-		}
-		errText := humanizeError(res.Error, res.Host.Host, res.Host.Port, execTimeout, "")
-		fmt.Printf("✗ %s (%s): %s\n", res.Host.Name, res.Host.Host, strings.TrimPrefix(errText, "✗ "))
 	}
 	os.Exit(1)
 }
