@@ -25,14 +25,14 @@ async function loadHosts() {
     }
     
     hostList.innerHTML = hosts.map(h => `
-      <div class="host-item" data-name="${h.name}">
+      <div class="host-item" data-name="${h.Name}">
         <span class="host-dot"></span>
-        <span>${h.name}</span>
+        <span>${h.Name}</span>
       </div>
     `).join('');
     
     execHost.innerHTML = '<option value="">-- 选择主机 --</option>' + 
-      hosts.map(h => `<option value="${h.name}">${h.name}</option>`).join('');
+      hosts.map(h => `<option value="${h.Name}">${h.Name}</option>`).join('');
     
     // Host item click
     hostList.querySelectorAll('.host-item:not(.empty)').forEach(item => {
@@ -86,10 +86,10 @@ async function loadPlaybooks() {
     list.innerHTML = data.playbooks.map(p => `
       <div class="playbook-item">
         <div class="playbook-info">
-          <span class="playbook-name">${p.name}</span>
-          <span class="playbook-meta">${p.hosts} | ${p.tasks} tasks</span>
+          <span class="playbook-name">${p}</span>
+          <span class="playbook-meta">${p}</span>
         </div>
-        <button class="btn btn-secondary" onclick="runPlaybook('${p.name}')">运行</button>
+        <button class="btn btn-secondary" onclick="runPlaybook('${p}')">运行</button>
       </div>
     `).join('');
   } catch (e) { console.error('Failed to load playbooks:', e); }
@@ -112,25 +112,41 @@ async function runPlaybook(name) {
   } catch (e) { output.textContent = '错误: ' + e.message; }
 }
 
+function formatAuditTime(createdAt) {
+  if (!createdAt) return '';
+  const d = new Date(createdAt);
+  if (Number.isNaN(d.getTime())) return '';
+  const pad = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+
 // Load audit logs
 async function loadAudit() {
   try {
     const resp = await fetch(API + '/api/logs?limit=50');
     const data = await resp.json();
     const tbody = document.getElementById('auditBody');
+    const headerRow = document.querySelector('#tab-audit thead tr');
+    if (headerRow && !headerRow.querySelector('[data-col="operator"]')) {
+      const th = document.createElement('th');
+      th.setAttribute('data-col', 'operator');
+      th.textContent = 'Operator';
+      headerRow.appendChild(th);
+    }
     
     if (!data.logs || data.logs.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="5">暂无记录</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="6">暂无记录</td></tr>';
       return;
     }
     
     tbody.innerHTML = data.logs.map(l => `
       <tr>
-        <td>${l.time || ''}</td>
-        <td>${l.host || ''}</td>
-        <td>${l.command || ''}</td>
-        <td>${l.exit_code || 0}</td>
-        <td>${l.duration || '0s'}</td>
+        <td>${formatAuditTime(l.CreatedAt)}</td>
+        <td>${l.HostName || ''}</td>
+        <td>${l.Command || ''}</td>
+        <td>${l.ExitCode || 0}</td>
+        <td>${l.DurationMS || 0}ms</td>
+        <td>${l.Operator || ''}</td>
       </tr>
     `).join('');
   } catch (e) { console.error('Failed to load audit:', e); }
