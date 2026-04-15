@@ -16,6 +16,8 @@ import (
 	"github.com/pkg/sftp"
 
 	"github.com/yourname/sshops/internal/inventory"
+	"github.com/yourname/sshops/internal/playbook"
+	execrunner "github.com/yourname/sshops/internal/runner"
 	sshclient "github.com/yourname/sshops/internal/ssh"
 )
 
@@ -82,6 +84,58 @@ func (s *Server) buildToolDefs() []ToolDef {
 				"required": []string{"host"},
 			},
 		},
+		{
+			Name:        "run_playbook",
+			Description: "执行 Playbook 文件，完成多步骤运维任务",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"name": map[string]interface{}{"type": "string", "description": "Playbook 文件名或路径"},
+					"vars": map[string]interface{}{"type": "object", "description": "Playbook 变量覆盖"},
+				},
+				"required": []string{"name"},
+			},
+		},
+		{
+			Name:        "check_service",
+			Description: "检查远程主机服务状态",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"host":    map[string]interface{}{"type": "string", "description": "主机名称（inventory 中的 name）或 IP"},
+					"service": map[string]interface{}{"type": "string", "description": "服务名称"},
+				},
+				"required": []string{"host", "service"},
+			},
+		},
+		{
+			Name:        "tail_log",
+			Description: "查看远程日志文件末尾内容",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"host":  map[string]interface{}{"type": "string", "description": "主机名称（inventory 中的 name）或 IP"},
+					"path":  map[string]interface{}{"type": "string", "description": "远程日志文件路径"},
+					"lines": map[string]interface{}{"type": "integer", "description": "返回行数，默认 50"},
+				},
+				"required": []string{"host", "path"},
+			},
+		},
+		{
+			Name:        "batch_exec",
+			Description: "在多台主机上并发执行命令",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"group":       map[string]interface{}{"type": "string", "description": "按分组过滤主机"},
+					"tag":         map[string]interface{}{"type": "string", "description": "按标签过滤主机，格式 key=value,key=value"},
+					"command":     map[string]interface{}{"type": "string", "description": "要执行的 shell 命令"},
+					"concurrency": map[string]interface{}{"type": "integer", "description": "并发数，默认 10"},
+					"timeout":     map[string]interface{}{"type": "integer", "description": "每台主机超时秒数，默认 connect_timeout"},
+				},
+				"required": []string{"command"},
+			},
+		},
 	}
 }
 
@@ -97,6 +151,14 @@ func (s *Server) callTool(name string, args map[string]interface{}) (string, err
 		return s.toolListServers(args)
 	case "get_metrics":
 		return s.toolGetMetrics(args)
+	case "run_playbook":
+		return s.toolRunPlaybook(args)
+	case "check_service":
+		return s.toolCheckService(args)
+	case "tail_log":
+		return s.toolTailLog(args)
+	case "batch_exec":
+		return s.toolBatchExec(args)
 	default:
 		return "", fmt.Errorf("未知 tool: %s", name)
 	}
@@ -280,6 +342,171 @@ func (s *Server) toolGetMetrics(args map[string]interface{}) (string, error) {
 		extractStdout(values["LOAD"]),
 		extractStdout(values["PROC"]),
 	), nil
+}
+
+func (s *Server) toolRunPlaybook(args map[string]interface{}) (string, error) {
+	name := getStringArg(args, "name")
+	if name == "" {
+		return "", errors.New("name 为必填参数")
+	}
+	if s.inventory == nil {
+		return "", errors.New("inventory 未初始化")
+	}
+
+	vars, err := getStringMapArg(args, "vars")
+	if err != nil {
+		return "", err
+	}
+
+	pb, err := playbook.Load(name)
+	if err != nil {
+		return "", err
+	}
+
+	timeout := s.config.ConnectTimeout
+	if timeout <= 0 {
+		timeout = 30
+	}
+	r := playbook.NewPlaybookRunner(s.inventory, execrunner.NewRunner(10, timeout, 0))
+	r.KeyPath = strings.TrimSpace(s.config.DefaultKeyPath)
+	r.Vars = vars
+
+	var out bytes.Buffer
+	r.Out = &out
+	if err := r.Run(pb); err != nil {
+		prefix := strings.TrimSpace(out.String())
+		if prefix == "" {
+			return "", err
+		}
+		return "", fmt.Errorf("%s\n\n%s", prefix, err)
+	}
+
+	text := strings.TrimSpace(out.String())
+	if text == "" {
+		return "Playbook 执行完成", nil
+	}
+	return text, nil
+}
+
+func (s *Server) toolCheckService(args map[string]interface{}) (string, error) {
+	hostArg := getStringArg(args, "host")
+	service := getStringArg(args, "service")
+	if hostArg == "" || service == "" {
+		return "", errors.New("host 和 service 为必填参数")
+	}
+
+	command := fmt.Sprintf(
+		"if command -v systemctl >/dev/null 2>&1; then systemctl is-active %s; systemctl status %s --no-pager -l | tail -n 80; elif command -v service >/dev/null 2>&1; then service %s status; else ps -ef | grep -F %s | grep -v grep; fi",
+		shellQuote(service),
+		shellQuote(service),
+		shellQuote(service),
+		shellQuote(service),
+	)
+	return s.toolExecCommand(map[string]interface{}{
+		"host":    hostArg,
+		"command": command,
+		"timeout": 30,
+	})
+}
+
+func (s *Server) toolTailLog(args map[string]interface{}) (string, error) {
+	hostArg := getStringArg(args, "host")
+	logPath := getStringArg(args, "path")
+	if hostArg == "" || logPath == "" {
+		return "", errors.New("host 和 path 为必填参数")
+	}
+
+	lines := getIntArg(args, "lines", 50)
+	if lines <= 0 {
+		lines = 50
+	}
+
+	command := fmt.Sprintf("tail -n %d %s", lines, shellQuote(logPath))
+	return s.toolExecCommand(map[string]interface{}{
+		"host":    hostArg,
+		"command": command,
+		"timeout": 30,
+	})
+}
+
+func (s *Server) toolBatchExec(args map[string]interface{}) (string, error) {
+	command := getStringArg(args, "command")
+	if command == "" {
+		return "", errors.New("command 为必填参数")
+	}
+	if s.inventory == nil {
+		return "", errors.New("inventory 未初始化")
+	}
+
+	group := getStringArg(args, "group")
+	tag := getStringArg(args, "tag")
+	hosts := inventory.FilterByGroupAndTags(s.inventory.List(), group, tag)
+	if len(hosts) == 0 {
+		return "", errors.New("未找到匹配的主机")
+	}
+
+	concurrency := getIntArg(args, "concurrency", 10)
+	if concurrency <= 0 {
+		concurrency = 10
+	}
+	timeout := getIntArg(args, "timeout", s.config.ConnectTimeout)
+	if timeout <= 0 {
+		timeout = 30
+	}
+
+	tasks := make([]execrunner.Task, 0, len(hosts))
+	for _, h := range hosts {
+		if h == nil {
+			continue
+		}
+		keyPath, password := s.resolveCredential(h)
+		tasks = append(tasks, execrunner.Task{
+			Host:     h,
+			Command:  command,
+			KeyPath:  keyPath,
+			Password: password,
+		})
+	}
+	if len(tasks) == 0 {
+		return "", errors.New("没有可执行的主机任务")
+	}
+
+	r := execrunner.NewRunner(concurrency, timeout, 0)
+	start := time.Now()
+	results := r.Run(tasks)
+	duration := time.Since(start).Round(100 * time.Millisecond)
+
+	success := 0
+	failed := 0
+	lines := make([]string, 0, len(results)+1)
+	for _, res := range results {
+		if res.Host == nil {
+			failed++
+			lines = append(lines, "[FAIL] unknown: 结果缺少主机信息")
+			continue
+		}
+		if res.Error == nil && res.ExitCode == 0 {
+			success++
+			lines = append(lines, fmt.Sprintf("[OK] %s (%s) exit=%d duration=%s", res.Host.Name, res.Host.Host, res.ExitCode, res.Duration.Round(time.Millisecond)))
+			continue
+		}
+
+		failed++
+		errText := "命令执行失败"
+		if res.Error != nil {
+			errText = strings.TrimSpace(res.Error.Error())
+		}
+		lines = append(lines, fmt.Sprintf("[FAIL] %s (%s) exit=%d duration=%s error=%s",
+			res.Host.Name,
+			res.Host.Host,
+			res.ExitCode,
+			res.Duration.Round(time.Millisecond),
+			errText,
+		))
+	}
+
+	header := fmt.Sprintf("batch_exec 完成: total=%d success=%d failed=%d duration=%s", len(results), success, failed, duration)
+	return header + "\n" + strings.Join(lines, "\n"), nil
 }
 
 func extractStdout(execResult string) string {
@@ -493,6 +720,47 @@ func getIntArg(args map[string]interface{}, key string, def int) int {
 	default:
 		return def
 	}
+}
+
+func getStringMapArg(args map[string]interface{}, key string) (map[string]string, error) {
+	result := map[string]string{}
+	if args == nil {
+		return result, nil
+	}
+	v, ok := args[key]
+	if !ok || v == nil {
+		return result, nil
+	}
+
+	switch t := v.(type) {
+	case map[string]string:
+		for k, val := range t {
+			k = strings.TrimSpace(k)
+			if k == "" {
+				continue
+			}
+			result[k] = strings.TrimSpace(val)
+		}
+		return result, nil
+	case map[string]interface{}:
+		for k, val := range t {
+			k = strings.TrimSpace(k)
+			if k == "" {
+				continue
+			}
+			result[k] = strings.TrimSpace(fmt.Sprintf("%v", val))
+		}
+		return result, nil
+	default:
+		return nil, fmt.Errorf("%s 必须是 object", key)
+	}
+}
+
+func shellQuote(value string) string {
+	if value == "" {
+		return "''"
+	}
+	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
 }
 
 func parseMCPProxyChain(raw string, defaultUser string, keyPath string, password string) ([]sshclient.ProxyConfig, error) {

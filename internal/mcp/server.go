@@ -119,6 +119,9 @@ func (s *Server) handleToolsCall(req *JSONRPCRequest) *JSONRPCResponse {
 	if err := json.Unmarshal(req.Params, &params); err != nil {
 		return &JSONRPCResponse{JSONRPC: "2.0", ID: req.ID, Error: &RPCError{Code: -32602, Message: "Invalid params"}}
 	}
+	if params.Arguments == nil {
+		params.Arguments = map[string]interface{}{}
+	}
 
 	text, err := s.callTool(params.Name, params.Arguments)
 	result := toolCallResult{Content: []toolContent{{Type: "text", Text: text}}}
