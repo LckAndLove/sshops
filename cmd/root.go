@@ -14,9 +14,9 @@ import (
 const AppName = "sshops"
 
 var (
-	cfgFile    string
-	appConfig  *config.Config
-	rootCmd    = &cobra.Command{
+	cfgFile   string
+	appConfig *config.Config
+	rootCmd   = &cobra.Command{
 		Use:   AppName,
 		Short: "SSH 运维命令行工具",
 	}
@@ -34,6 +34,7 @@ func init() {
 
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", defaultConfigPath, "配置文件路径")
 	rootCmd.AddCommand(versionCmd)
+	rootCmd.AddCommand(playbookCmd)
 	cobra.OnInitialize(initConfig)
 }
 
