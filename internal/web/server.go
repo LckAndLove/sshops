@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"net/http"
 	"strconv"
 	"strings"
@@ -48,7 +49,8 @@ func (s *WebServer) Start(port int) error {
 	}
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/health", s.handleHealth)
+
+	// Register API routes first.
 	mux.HandleFunc("/api/hosts", s.handleHosts)
 	mux.HandleFunc("/api/hosts/", s.handleHostByName)
 	mux.HandleFunc("/api/exec", s.handleExec)
@@ -56,6 +58,35 @@ func (s *WebServer) Start(port int) error {
 	mux.HandleFunc("/api/logs", s.handleLogs)
 	mux.HandleFunc("/api/playbooks", s.handlePlaybooks)
 	mux.HandleFunc("/api/playbooks/run", s.handleRunPlaybook)
+
+	// Then health endpoint.
+	mux.HandleFunc("/health", s.handleHealth)
+
+	// Then static assets under /static/.
+	staticFS, err := fs.Sub(StaticFiles, "static")
+	if err != nil {
+		return fmt.Errorf("create static sub-fs: %w", err)
+	}
+	mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.FS(staticFS))))
+
+	// Finally catch-all for SPA entry.
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			http.NotFound(w, r)
+			return
+		}
+		indexHTML, err := StaticFiles.ReadFile("static/index.html")
+		if err != nil {
+			http.Error(w, "index not found", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		if r.Method == http.MethodHead {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		_, _ = w.Write(indexHTML)
+	})
 
 	addr := ":" + strconv.Itoa(port)
 	return http.ListenAndServe(addr, s.withMiddleware(mux))
