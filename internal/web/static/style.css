@@ -1,0 +1,148 @@
+:root {
+  --bg-primary: #0d1117;
+  --bg-secondary: #161b22;
+  --bg-card: #21262d;
+  --border: #30363d;
+  --text-primary: #e6edf3;
+  --text-secondary: #8b949e;
+  --accent: #58a6ff;
+  --success: #3fb950;
+  --danger: #f85149;
+  --warning: #d29922;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  height: 100vh;
+  overflow: hidden;
+}
+
+.navbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0 20px;
+  height: 50px;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border);
+}
+
+.nav-brand { display: flex; align-items: center; gap: 8px; }
+.logo { font-size: 24px; color: var(--accent); }
+.version { font-size: 12px; color: var(--text-secondary); }
+
+.status-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--text-secondary);
+}
+.status-dot.online { background: var(--success); }
+
+.main-container { display: flex; height: calc(100vh - 50px); }
+
+.sidebar {
+  width: 200px;
+  background: var(--bg-secondary);
+  border-right: 1px solid var(--border);
+  overflow-y: auto;
+}
+
+.sidebar-header { padding: 15px; border-bottom: 1px solid var(--border); }
+.sidebar-header h3 { font-size: 14px; color: var(--text-secondary); }
+
+.host-list { padding: 10px; }
+.host-item {
+  padding: 8px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.host-item:hover { background: var(--bg-card); }
+.host-item.selected { background: var(--bg-card); border: 1px solid var(--accent); }
+.host-item.empty { color: var(--text-secondary); cursor: default; }
+.host-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--success); }
+
+.content { flex: 1; padding: 20px; overflow-y: auto; }
+
+.tabs { display: flex; gap: 5px; margin-bottom: 20px; }
+.tab {
+  padding: 10px 20px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 14px;
+}
+.tab.active { background: var(--bg-card); color: var(--accent); border-color: var(--accent); }
+
+.tab-content { display: none; }
+.tab-content.active { display: block; }
+
+.output-area {
+  background: #000;
+  color: #0f0;
+  padding: 15px;
+  border-radius: 6px;
+  font-family: 'Consolas', monospace;
+  font-size: 13px;
+  min-height: 200px;
+  max-height: 400px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  margin-top: 15px;
+}
+
+.button-row { display: flex; gap: 10px; margin-top: 10px; }
+
+.btn {
+  padding: 8px 16px;
+  border-radius: 6px;
+  border: none;
+  cursor: pointer;
+  font-size: 14px;
+}
+.btn-primary { background: var(--accent); color: #fff; }
+.btn-secondary { background: var(--bg-card); color: var(--text-primary); }
+
+textarea {
+  width: 100%;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-primary);
+  padding: 10px;
+  font-family: 'Consolas', monospace;
+  resize: vertical;
+  margin-top: 10px;
+}
+
+.metric-cards { display: grid; grid-template-columns: repeat(2, 1fr); gap: 15px; margin-bottom: 20px; }
+.metric-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; padding: 20px; }
+.metric-card h4 { font-size: 12px; color: var(--text-secondary); margin-bottom: 10px; }
+.metric-value { font-size: 24px; font-weight: bold; }
+
+.playbook-list { display: flex; flex-direction: column; gap: 10px; }
+.playbook-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 15px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.playbook-info { display: flex; flex-direction: column; gap: 4px; }
+.playbook-name { font-weight: bold; }
+.playbook-meta { font-size: 12px; color: var(--text-secondary); }
+
+.audit-table { width: 100%; border-collapse: collapse; }
+.audit-table th, .audit-table td { padding: 10px; text-align: left; border-bottom: 1px solid var(--border); }
+.audit-table th { color: var(--text-secondary); font-size: 12px; font-weight: normal; }
+.audit-table td { font-size: 13px; }

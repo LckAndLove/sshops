@@ -400,7 +400,6 @@ func (s *WebServer) handleRunPlaybook(w http.ResponseWriter, r *http.Request) {
 	}
 	pr := playbook.NewPlaybookRunner(s.inventory, execrunner.NewRunner(10, timeout, 0))
 	pr.KeyPath = strings.TrimSpace(s.config.DefaultKeyPath)
-	pr.Password = strings.TrimSpace(s.password)
 	pr.Vars = req.Vars
 
 	var out bytes.Buffer
