@@ -228,3 +228,36 @@ audit_db_path: ~/.sshops/audit.db
 ## License
 
 This project is licensed under the MIT License.
+
+## Playbook 自动化
+
+### 快速体验内置 Playbook
+
+  # 查看所有内置 Playbook
+  sshops playbook list
+
+  # 健康巡检（检查所有主机状态）
+  sshops playbook run check-health
+
+  # 应用部署
+  sshops playbook run deploy-app --var app_dir=/opt/myapp --var service_name=nginx
+
+  # 日志清理
+  sshops playbook run cleanup-logs --var days=7
+
+### 创建自定义 Playbook
+
+  # 生成模板文件
+  sshops playbook init my-deploy
+
+  # 编辑 my-deploy.yml 后执行
+  sshops playbook run ./my-deploy.yml --var version=2.0.0
+
+### 在 Claude Code 中使用 Playbook
+
+接入 MCP 后，直接用自然语言：
+  "帮我在 prod 组所有服务器上执行健康巡检"
+  "部署新版本到 prod-01，版本号 2.1.0"
+  "清理 prod 组所有服务器上 30 天前的日志"
+
+Claude 会自动选择合适的 Playbook 或调用 batch_exec 执行。
