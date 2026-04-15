@@ -21,7 +21,7 @@ type PlaybookHostResult struct {
 }
 
 func PrintHostTable(hosts []*inventory.Host) {
-	fmt.Printf("共 %d 台主机\n\n", len(hosts))
+	fmt.Printf("%s\n\n", color.New(color.FgCyan).Sprint(fmt.Sprintf("共 %d 台主机", len(hosts))))
 
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(w, "NAME\tHOST\tPORT\tUSER\tGROUPS\tTAGS")
@@ -82,14 +82,14 @@ func PrintExecResult(results []runner.Result) {
 	total := len(results)
 	if failedCount > 0 {
 		fmt.Printf("%s %d/%d   %s %d/%d   total %s\n",
-			color.New(color.FgGreen).Sprint("OK"), okCount, total,
-			color.New(color.FgRed).Sprint("FAIL"), failedCount, total,
-			formatDuration(totalDuration),
+			color.New(color.FgGreen, color.Bold).Sprint("OK"), okCount, total,
+			color.New(color.FgRed, color.Bold).Sprint("FAIL"), failedCount, total,
+			color.New(color.FgYellow).Sprint(formatDuration(totalDuration)),
 		)
 	} else {
 		fmt.Printf("%s %d/%d   total %s\n",
-			color.New(color.FgGreen).Sprint("OK"), okCount, total,
-			formatDuration(totalDuration),
+			color.New(color.FgGreen, color.Bold).Sprint("OK"), okCount, total,
+			color.New(color.FgYellow).Sprint(formatDuration(totalDuration)),
 		)
 	}
 }

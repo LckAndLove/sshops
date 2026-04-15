@@ -192,11 +192,11 @@ func execSingleHost(cmd *cobra.Command, cfg *config.Config, command string) {
 	}
 
 	if exitCode == 0 {
-		color.New(color.FgGreen).Printf("✓ exit %d  duration %s\n", exitCode, duration)
+		color.New(color.FgGreen).Printf("OK  exit %d  duration %s\n", exitCode, color.New(color.FgYellow).Sprint(duration))
 		os.Exit(0)
 	}
 
-	color.New(color.FgRed).Printf("✗ exit %d  duration %s\n", exitCode, duration)
+	color.New(color.FgRed).Printf("FAIL  exit %d  duration %s\n", exitCode, color.New(color.FgYellow).Sprint(duration))
 	os.Exit(exitCode)
 }
 
