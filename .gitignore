@@ -9,3 +9,7 @@ sshops
 # 系统文件
 .DS_Store
 Thumbs.db
+
+README_remote.md
+*.enc
+*.db
