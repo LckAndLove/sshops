@@ -261,3 +261,32 @@ This project is licensed under the MIT License.
   "清理 prod 组所有服务器上 30 天前的日志"
 
 Claude 会自动选择合适的 Playbook 或调用 batch_exec 执行。
+
+## Web UI 控制台
+
+启动 Web 界面：
+
+  sshops web serve --port 8080 --open
+
+浏览器访问 http://localhost:8080
+
+功能：
+- 主机列表与实时状态
+- 命令执行与输出显示
+- Playbook 可视化运行
+- 审计日志查询
+
+加密访问（可选）：
+
+  sshops web serve --port 8080 --password yourpassword
+
+## AI 智能诊断
+
+在 Claude Code 中：
+
+  "prod-01 最近响应变慢，帮我诊断一下"
+  → 自动调用 diagnose tool，分析 CPU/内存/IO/网络
+  → 给出诊断报告和优化建议
+
+  "帮我检查所有服务器的健康状态"
+  → 自动调用 run_playbook check-health
