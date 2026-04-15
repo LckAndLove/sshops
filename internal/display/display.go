@@ -70,7 +70,7 @@ func PrintHostTable(hosts []*inventory.Host) {
 	}
 
 	fmt.Println(drawTop(widths))
-	fmt.Printf("│ %s │ %s │ %s │ %s │ %s │ %s │\n",
+	fmt.Printf("| %s | %s | %s | %s | %s | %s |\n",
 		padRight(headers[0], widths[0]),
 		padRight(headers[1], widths[1]),
 		padRight(headers[2], widths[2]),
@@ -86,7 +86,7 @@ func PrintHostTable(hosts []*inventory.Host) {
 		if strings.HasPrefix(name, "● ") {
 			name = greenDot + " " + strings.TrimPrefix(name, "● ")
 		}
-		fmt.Printf("│ %s │ %s │ %s │ %s │ %s │ %s │\n",
+		fmt.Printf("| %s | %s | %s | %s | %s | %s |\n",
 			padRight(name, widths[0]),
 			padRight(row[1], widths[1]),
 			padRight(row[2], widths[2]),
@@ -149,7 +149,7 @@ func PrintExecResult(results []runner.Result) {
 	}
 
 	fmt.Println(drawTop(widths))
-	fmt.Printf("│ %s │ %s │ %s │ %s │ %s │\n",
+	fmt.Printf("| %s | %s | %s | %s | %s |\n",
 		padRight(headers[0], widths[0]),
 		padRight(headers[1], widths[1]),
 		padRight(headers[2], widths[2]),
@@ -168,7 +168,7 @@ func PrintExecResult(results []runner.Result) {
 			status = red.Sprint(status)
 		}
 
-		fmt.Printf("│ %s │ %s │ %s │ %s │ %s │\n",
+		fmt.Printf("| %s | %s | %s | %s | %s |\n",
 			padRight(status, widths[0]),
 			padRight(row[1], widths[1]),
 			padRight(row[2], widths[2]),
@@ -179,20 +179,28 @@ func PrintExecResult(results []runner.Result) {
 	fmt.Println(drawBottom(widths))
 
 	total := len(results)
-	summary := fmt.Sprintf("%s %d/%d 成功   %s %d/%d 失败   总耗时 %s",
-		green.Sprint("✓"), okCount, total,
-		red.Sprint("✗"), failedCount, total,
-		formatDuration(totalDuration),
-	)
+	var summary string
+	if failedCount > 0 {
+		summary = fmt.Sprintf("%s %d/%d 成功   %s %d/%d 失败   总耗时 %s",
+			green.Sprint("✓"), okCount, total,
+			red.Sprint("✗"), failedCount, total,
+			formatDuration(totalDuration),
+		)
+	} else {
+		summary = fmt.Sprintf("%s %d/%d 成功   总耗时 %s",
+			green.Sprint("✓"), okCount, total,
+			formatDuration(totalDuration),
+		)
+	}
 	fmt.Println(summary)
 }
 
 func PrintPlaybookTask(taskName string, total, current int) {
-	fmt.Printf("TASK [%s] %s (%d/%d)\n", taskName, strings.Repeat("─", 20), current, total)
+	fmt.Printf("TASK [%s] %s (%d/%d)\n", taskName, strings.Repeat("-", 20), current, total)
 }
 
 func PrintPlaybookRecap(results map[string]*PlaybookHostResult) {
-	fmt.Printf("PLAY RECAP %s\n", strings.Repeat("─", 30))
+	fmt.Printf("PLAY RECAP %s\n", strings.Repeat("-", 30))
 	for host, r := range results {
 		if r == nil {
 			continue
@@ -236,16 +244,16 @@ func PrintDiagnosisReport(host string, symptom string, data map[string]string) {
 	}
 	width += 2
 
-	fmt.Printf("╔%s╗\n", strings.Repeat("═", width+2))
-	fmt.Printf("║ %s ║\n", padRight(title, width))
-	fmt.Printf("╠%s╣\n", strings.Repeat("═", width+2))
+	fmt.Printf("+%s+\n", strings.Repeat("-", width+2))
+	fmt.Printf("| %s |\n", padRight(title, width))
+	fmt.Printf("+%s+\n", strings.Repeat("-", width+2))
 	for k, v := range data {
-		fmt.Printf("║ %s ║\n", padRight("[ "+k+" ]", width))
+		fmt.Printf("| %s |\n", padRight("[ "+k+" ]", width))
 		for _, line := range strings.Split(v, "\n") {
-			fmt.Printf("║ %s ║\n", padRight(line, width))
+			fmt.Printf("| %s |\n", padRight(line, width))
 		}
 	}
-	fmt.Printf("╚%s╝\n", strings.Repeat("═", width+2))
+	fmt.Printf("+%s+\n", strings.Repeat("-", width+2))
 }
 
 func PrintMetricsCard(host string, metrics map[string]string) {
@@ -254,7 +262,7 @@ func PrintMetricsCard(host string, metrics map[string]string) {
 	if topRight < 1 {
 		topRight = 1
 	}
-	fmt.Printf("┌─ %s %s┐\n", host, strings.Repeat("─", topRight))
+	fmt.Printf("+- %s %s+\n", host, strings.Repeat("-", topRight))
 
 	keyWidth := 8
 	for _, k := range []string{"cpu", "memory", "disk"} {
@@ -264,7 +272,7 @@ func PrintMetricsCard(host string, metrics map[string]string) {
 		}
 		pct := parsePercent(raw)
 		bar := makeBar(pct)
-		fmt.Printf("│ %-*s [%s] %6.1f%% │\n", keyWidth, strings.ToUpper(k), bar, pct)
+		fmt.Printf("| %-*s [%s] %6.1f%% |\n", keyWidth, strings.ToUpper(k), bar, pct)
 	}
 
 	for k, v := range metrics {
@@ -272,10 +280,10 @@ func PrintMetricsCard(host string, metrics map[string]string) {
 			continue
 		}
 		line := fmt.Sprintf("%s: %s", k, v)
-		fmt.Printf("│ %s │\n", padRight(line, bodyWidth))
+		fmt.Printf("| %s |\n", padRight(line, bodyWidth))
 	}
 
-	fmt.Println("└───────────────────────────────────────────────────┘")
+	fmt.Println("+---------------------------------------------------+")
 }
 
 func makeBar(pct float64) string {
@@ -327,25 +335,25 @@ func padRight(s string, width int) string {
 func drawTop(widths []int) string {
 	parts := make([]string, 0, len(widths))
 	for _, w := range widths {
-		parts = append(parts, strings.Repeat("─", w+2))
+		parts = append(parts, strings.Repeat("-", w+2))
 	}
-	return "┌" + strings.Join(parts, "┬") + "┐"
+	return "+" + strings.Join(parts, "+") + "+"
 }
 
 func drawMid(widths []int) string {
 	parts := make([]string, 0, len(widths))
 	for _, w := range widths {
-		parts = append(parts, strings.Repeat("─", w+2))
+		parts = append(parts, strings.Repeat("-", w+2))
 	}
-	return "├" + strings.Join(parts, "┼") + "┤"
+	return "+" + strings.Join(parts, "+") + "+"
 }
 
 func drawBottom(widths []int) string {
 	parts := make([]string, 0, len(widths))
 	for _, w := range widths {
-		parts = append(parts, strings.Repeat("─", w+2))
+		parts = append(parts, strings.Repeat("-", w+2))
 	}
-	return "└" + strings.Join(parts, "┴") + "┘"
+	return "+" + strings.Join(parts, "+") + "+"
 }
 
 func formatDuration(d time.Duration) string {

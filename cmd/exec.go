@@ -247,9 +247,6 @@ func execBatchHosts(cfg *config.Config, command string, userSpecifiedKey bool) {
 		})
 	}
 
-	progress := runner.NewDisplay(hosts)
-	progress.Start()
-
 	logger, logErr := audit.NewLogger(cfg.AuditDBPath)
 	if logErr != nil {
 		fmt.Fprintln(os.Stderr, "⚠ 审计日志初始化失败：已跳过日志记录")
@@ -259,11 +256,10 @@ func execBatchHosts(cfg *config.Config, command string, userSpecifiedKey bool) {
 	}
 
 	r := runner.NewRunner(execConcurrency, execTimeout, execRetry)
-	r.Progress = progress
+	r.Progress = nil
 	r.Audit = logger
 
 	results := r.Run(tasks)
-	progress.Stop()
 
 	failed := 0
 	for _, res := range results {
