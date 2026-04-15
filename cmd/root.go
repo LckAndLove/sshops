@@ -35,6 +35,7 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", defaultConfigPath, "配置文件路径")
 	rootCmd.AddCommand(versionCmd)
 	rootCmd.AddCommand(playbookCmd)
+	rootCmd.AddCommand(webCmd)
 	cobra.OnInitialize(initConfig)
 }
 
