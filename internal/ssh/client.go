@@ -16,6 +16,11 @@ import (
 	"golang.org/x/term"
 )
 
+const (
+	maxOutputBytes = 10 * 1024 * 1024
+	truncationNote = "[输出已截断，超过 10MB 限制]"
+)
+
 var (
 	ErrPrivateKeyNotFound = errors.New("private key not found")
 	ErrInvalidPrivateKey  = errors.New("invalid private key")
@@ -39,6 +44,60 @@ type Client struct {
 	client  *gossh.Client
 	session *gossh.Session
 	auth    []gossh.AuthMethod
+}
+
+type outputLimiter struct {
+	mu           sync.Mutex
+	written      int
+	truncated    bool
+	noticeEmited bool
+	writers      []io.Writer
+}
+
+func newOutputLimiter(writers ...io.Writer) *outputLimiter {
+	unique := make([]io.Writer, 0, len(writers))
+	seen := map[io.Writer]bool{}
+	for _, w := range writers {
+		if w == nil || seen[w] {
+			continue
+		}
+		seen[w] = true
+		unique = append(unique, w)
+	}
+	return &outputLimiter{writers: unique}
+}
+
+func (l *outputLimiter) allow(text string) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.truncated {
+		return false
+	}
+	if l.written+len(text) > maxOutputBytes {
+		l.truncated = true
+		return false
+	}
+	l.written += len(text)
+	return true
+}
+
+func (l *outputLimiter) emitNotice(prefix string) {
+	l.mu.Lock()
+	if l.noticeEmited {
+		l.mu.Unlock()
+		return
+	}
+	l.noticeEmited = true
+	writers := append([]io.Writer{}, l.writers...)
+	l.mu.Unlock()
+
+	printLine(truncationNote, false, prefix)
+	for _, w := range writers {
+		if w == nil {
+			continue
+		}
+		_, _ = io.WriteString(w, truncationNote+"\n")
+	}
 }
 
 func NewClient(host string, port int, user string, timeout int) *Client {
@@ -154,17 +213,18 @@ func (c *Client) run(command string, prefix string, stdoutWriter io.Writer, stde
 		return 1, ErrCommandRunFailed
 	}
 
+	limiter := newOutputLimiter(stdoutWriter, stderrWriter)
 	var wg sync.WaitGroup
 	wg.Add(2)
 
 	go func() {
 		defer wg.Done()
-		streamLines(stdoutPipe, false, prefix, stdoutWriter)
+		streamLines(stdoutPipe, false, prefix, stdoutWriter, limiter)
 	}()
 
 	go func() {
 		defer wg.Done()
-		streamLines(stderrPipe, true, prefix, stderrWriter)
+		streamLines(stderrPipe, true, prefix, stderrWriter, limiter)
 	}()
 
 	wg.Wait()
@@ -214,18 +274,29 @@ func (c *Client) Raw() *gossh.Client {
 	return c.client
 }
 
-func streamLines(reader io.Reader, isStderr bool, prefix string, extraWriter io.Writer) {
+func streamLines(reader io.Reader, isStderr bool, prefix string, extraWriter io.Writer, limiter *outputLimiter) {
 	scanner := bufio.NewScanner(reader)
 	buf := make([]byte, 0, 64*1024)
 	scanner.Buffer(buf, 1024*1024)
 
 	for scanner.Scan() {
-		line := scanner.Text()
+		line := normalizeOutput(scanner.Text())
+		chunk := line + "\n"
+		if limiter != nil && !limiter.allow(chunk) {
+			limiter.emitNotice(prefix)
+			return
+		}
 		printLine(line, isStderr, prefix)
 		if extraWriter != nil {
-			_, _ = io.WriteString(extraWriter, line+"\n")
+			_, _ = io.WriteString(extraWriter, chunk)
 		}
 	}
+}
+
+func normalizeOutput(s string) string {
+	s = strings.ReplaceAll(s, "\r\n", "\n")
+	s = strings.ReplaceAll(s, "\r", "")
+	return strings.ToValidUTF8(s, "?")
 }
 
 func printLine(line string, isStderr bool, prefix string) {

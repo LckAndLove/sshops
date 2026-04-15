@@ -133,7 +133,11 @@ func (s *Server) toolExecCommand(args map[string]interface{}) (string, error) {
 		stderr = "（无）"
 	}
 
-	return fmt.Sprintf("exit_code: %d\nduration: %s\n\n[stdout]\n%s\n\n[stderr]\n%s", exitCode, duration.Round(time.Millisecond), stdout, stderr), nil
+	result := fmt.Sprintf("exit_code: %d\nduration: %s\n\n[stdout]\n%s\n\n[stderr]\n%s", exitCode, duration.Round(time.Millisecond), stdout, stderr)
+	if hasDangerousPattern(command) {
+		result += "\n⚠ 警告：检测到高危命令模式，请确认操作意图"
+	}
+	return result, nil
 }
 
 func (s *Server) toolUploadFile(args map[string]interface{}) (string, error) {
@@ -539,4 +543,19 @@ func parseMCPProxyChain(raw string, defaultUser string, keyPath string, password
 		})
 	}
 	return proxies, nil
+}
+
+func hasDangerousPattern(command string) bool {
+	cmd := strings.ToLower(command)
+	patterns := []string{
+		"rm -rf /",
+		"> /dev/sda",
+		"dd if=/dev/zero",
+	}
+	for _, p := range patterns {
+		if strings.Contains(cmd, p) {
+			return true
+		}
+	}
+	return false
 }

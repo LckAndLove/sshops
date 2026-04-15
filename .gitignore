@@ -13,3 +13,5 @@ Thumbs.db
 README_remote.md
 *.enc
 *.db
+
+*.exe~
