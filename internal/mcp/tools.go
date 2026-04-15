@@ -25,7 +25,7 @@ func (s *Server) buildToolDefs() []ToolDef {
 	return []ToolDef{
 		{
 			Name:        "exec_command",
-			Description: "在远程服务器上执行 shell 命令，返回输出结果",
+			Description: "在远程服务器上执行 shell 命令。适用于：查看日志、检查进程、修改配置、重启服务等单次操作。如需批量操作多台主机请用 batch_exec。",
 			InputSchema: map[string]interface{}{
 				"type": "object",
 				"properties": map[string]interface{}{
@@ -75,7 +75,7 @@ func (s *Server) buildToolDefs() []ToolDef {
 		},
 		{
 			Name:        "get_metrics",
-			Description: "采集远程服务器的系统指标",
+			Description: "获取服务器系统指标（CPU、内存、磁盘、进程）。适用于：服务器巡检、性能监控、容量规划。",
 			InputSchema: map[string]interface{}{
 				"type": "object",
 				"properties": map[string]interface{}{
@@ -86,7 +86,7 @@ func (s *Server) buildToolDefs() []ToolDef {
 		},
 		{
 			Name:        "run_playbook",
-			Description: "执行 Playbook 文件，完成多步骤运维任务",
+			Description: "执行预定义的 Playbook 自动化任务。适用于：标准化部署流程、定期维护任务、多步骤运维操作。内置 Playbook：check-health、deploy-app、cleanup-logs、update-system、collect-info",
 			InputSchema: map[string]interface{}{
 				"type": "object",
 				"properties": map[string]interface{}{
@@ -123,7 +123,7 @@ func (s *Server) buildToolDefs() []ToolDef {
 		},
 		{
 			Name:        "batch_exec",
-			Description: "在多台主机上并发执行命令",
+			Description: "在多台主机上并发执行相同命令。适用于：批量重启服务、批量查看状态、批量修改配置。比多次调用 exec_command 更高效。",
 			InputSchema: map[string]interface{}{
 				"type": "object",
 				"properties": map[string]interface{}{
@@ -134,6 +134,18 @@ func (s *Server) buildToolDefs() []ToolDef {
 					"timeout":     map[string]interface{}{"type": "integer", "description": "每台主机超时秒数，默认 connect_timeout"},
 				},
 				"required": []string{"command"},
+			},
+		},
+		{
+			Name:        "diagnose",
+			Description: "智能诊断服务器问题，分析异常并给出建议",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"host":    map[string]interface{}{"type": "string", "description": "主机名称（inventory 中的 name）或 IP"},
+					"symptom": map[string]interface{}{"type": "string", "description": "问题症状描述"},
+				},
+				"required": []string{"host", "symptom"},
 			},
 		},
 	}
@@ -159,6 +171,8 @@ func (s *Server) callTool(name string, args map[string]interface{}) (string, err
 		return s.toolTailLog(args)
 	case "batch_exec":
 		return s.toolBatchExec(args)
+	case "diagnose":
+		return s.toolDiagnose(args)
 	default:
 		return "", fmt.Errorf("未知 tool: %s", name)
 	}
