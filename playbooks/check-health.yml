@@ -1,0 +1,7 @@
+name: check-health
+hosts: all
+tasks:
+  - name: check uptime
+    command: "uptime"
+  - name: check disk usage
+    command: "df -h"

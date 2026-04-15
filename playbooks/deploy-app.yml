@@ -1,0 +1,7 @@
+name: deploy-app
+hosts: prod
+tasks:
+  - name: pull latest package
+    command: "echo deploy package"
+  - name: restart service
+    command: "echo restart app"

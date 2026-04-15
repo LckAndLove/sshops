@@ -1,0 +1,7 @@
+name: update-system
+hosts: all
+tasks:
+  - name: update package index
+    command: "sudo apt-get update"
+  - name: upgrade packages
+    command: "sudo apt-get upgrade -y"

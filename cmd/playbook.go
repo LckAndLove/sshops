@@ -69,24 +69,58 @@ var playbookRunCmd = &cobra.Command{
 
 var playbookListCmd = &cobra.Command{
 	Use:   "list",
-	Short: "列出当前目录中的 playbook 文件",
+	Short: "列出内置与自定义 playbook 文件",
 	Run: func(cmd *cobra.Command, args []string) {
+		type row struct {
+			File    string
+			Type    string
+			Summary *playbookSummary
+		}
+
+		rows := make([]row, 0, 16)
+		for _, file := range playbook.BuiltinPlaybookFiles() {
+			path := playbook.BuiltinPlaybookPath(file)
+			summary, err := loadPlaybookSummary(path)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "✗ 解析内置 playbook 失败 %s: %s\n", path, err.Error())
+				os.Exit(1)
+			}
+			rows = append(rows, row{
+				File:    path,
+				Type:    "[内置]",
+				Summary: summary,
+			})
+		}
+
 		matches, err := filepath.Glob("*.yml")
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "✗ 扫描 yml 文件失败")
 			os.Exit(1)
 		}
-
-		sort.Strings(matches)
-		w := tabwriter.NewWriter(os.Stdout, 2, 4, 2, ' ', 0)
-		fmt.Fprintln(w, "FILE\tNAME\tHOSTS\tTASKS")
 		for _, file := range matches {
 			summary, err := loadPlaybookSummary(file)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "✗ 解析文件失败 %s: %s\n", file, err.Error())
 				os.Exit(1)
 			}
-			fmt.Fprintf(w, "%s\t%s\t%s\t%d\n", file, valueOrDefault(summary.Name, "-"), valueOrDefault(summary.Hosts, "-"), len(summary.Tasks))
+			rows = append(rows, row{
+				File:    file,
+				Type:    "[用户]",
+				Summary: summary,
+			})
+		}
+
+		sort.Slice(rows, func(i, j int) bool {
+			if rows[i].Type != rows[j].Type {
+				return rows[i].Type < rows[j].Type
+			}
+			return rows[i].File < rows[j].File
+		})
+
+		w := tabwriter.NewWriter(os.Stdout, 2, 4, 2, ' ', 0)
+		fmt.Fprintln(w, "TYPE\tFILE\tNAME\tHOSTS\tTASKS")
+		for _, item := range rows {
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%d\n", item.Type, item.File, valueOrDefault(item.Summary.Name, "-"), valueOrDefault(item.Summary.Hosts, "-"), len(item.Summary.Tasks))
 		}
 		_ = w.Flush()
 	},

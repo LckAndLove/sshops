@@ -1,0 +1,5 @@
+name: collect-info
+hosts: all
+tasks:
+  - name: collect basic info
+    command: "hostname && uname -a && free -m"

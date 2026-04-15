@@ -1,0 +1,5 @@
+name: cleanup-logs
+hosts: all
+tasks:
+  - name: cleanup old logs
+    command: "find /var/log -type f -name '*.log' -mtime +7 -delete"
