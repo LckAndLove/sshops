@@ -13,6 +13,8 @@ type Config struct {
 	DefaultPort    int    `yaml:"default_port"`
 	DefaultKeyPath string `yaml:"default_key_path"`
 	ConnectTimeout int    `yaml:"connect_timeout"`
+	InventoryPath  string `yaml:"inventory_path"`
+	VaultPath      string `yaml:"vault_path"`
 }
 
 func Default() *Config {
@@ -21,6 +23,8 @@ func Default() *Config {
 		DefaultPort:    22,
 		DefaultKeyPath: defaultKeyPath(),
 		ConnectTimeout: 30,
+		InventoryPath:  defaultInventoryPath(),
+		VaultPath:      defaultVaultPath(),
 	}
 }
 
@@ -50,6 +54,12 @@ func Load(path string) (*Config, error) {
 	}
 	if cfg.DefaultKeyPath == "" {
 		cfg.DefaultKeyPath = defaultKeyPath()
+	}
+	if cfg.InventoryPath == "" {
+		cfg.InventoryPath = defaultInventoryPath()
+	}
+	if cfg.VaultPath == "" {
+		cfg.VaultPath = defaultVaultPath()
 	}
 
 	return cfg, nil
@@ -85,4 +95,36 @@ func defaultKeyPath() string {
 		return filepath.Join(".", ".ssh", "id_rsa")
 	}
 	return filepath.Join(home, ".ssh", "id_rsa")
+}
+
+func defaultInventoryPath() string {
+	if runtime.GOOS == "windows" {
+		appData := os.Getenv("APPDATA")
+		if appData == "" {
+			appData = "."
+		}
+		return filepath.Join(appData, "sshops", "inventory.yaml")
+	}
+
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return filepath.Join(".", ".sshops", "inventory.yaml")
+	}
+	return filepath.Join(home, ".sshops", "inventory.yaml")
+}
+
+func defaultVaultPath() string {
+	if runtime.GOOS == "windows" {
+		appData := os.Getenv("APPDATA")
+		if appData == "" {
+			appData = "."
+		}
+		return filepath.Join(appData, "sshops", "vault.enc")
+	}
+
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return filepath.Join(".", ".sshops", "vault.enc")
+	}
+	return filepath.Join(home, ".sshops", "vault.enc")
 }

@@ -13,7 +13,9 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/yourname/sshops/internal/config"
+	"github.com/yourname/sshops/internal/inventory"
 	sshclient "github.com/yourname/sshops/internal/ssh"
+	"github.com/yourname/sshops/internal/vault"
 )
 
 var (
@@ -24,6 +26,8 @@ var (
 	execPassword string
 	execTimeout  int
 	execProxy    string
+	execGroup    string
+	execTag      string
 )
 
 var execCmd = &cobra.Command{
@@ -32,11 +36,6 @@ var execCmd = &cobra.Command{
 	Args:  cobra.ArbitraryArgs,
 	Run: func(cmd *cobra.Command, args []string) {
 		command := strings.TrimSpace(strings.Join(args, " "))
-		if strings.TrimSpace(execHost) == "" {
-			_ = cmd.Usage()
-			fmt.Fprintln(os.Stderr, "✗ 请提供目标主机，例如：sshops exec --host 10.0.0.1 \"uname -a\"")
-			os.Exit(1)
-		}
 		if command == "" {
 			_ = cmd.Usage()
 			fmt.Fprintln(os.Stderr, "✗ 请提供要执行的命令，例如：sshops exec --host 10.0.0.1 \"uname -a\"")
@@ -46,51 +45,18 @@ var execCmd = &cobra.Command{
 		cfg := currentConfig()
 		applyExecDefaults(cmd, cfg)
 
-		client := sshclient.NewClient(execHost, execPort, execUser, execTimeout)
+		if strings.TrimSpace(execHost) != "" {
+			execSingleHost(cmd, cfg, command)
+			return
+		}
 
-		if execKey != "" {
-			if err := client.WithKey(execKey); err != nil {
-				fmt.Fprintln(os.Stderr, humanizeError(err, execHost, execPort, execTimeout, execKey))
-				os.Exit(1)
-			}
-		} else if execPassword != "" {
-			if err := client.WithPassword(execPassword); err != nil {
-				fmt.Fprintln(os.Stderr, "✗ 认证设置失败：无法使用密码认证")
-				os.Exit(1)
-			}
-		} else {
-			fmt.Fprintln(os.Stderr, "✗ 认证失败：请提供 --key 或 --password")
+		if strings.TrimSpace(execGroup) == "" && strings.TrimSpace(execTag) == "" {
+			_ = cmd.Usage()
+			fmt.Fprintln(os.Stderr, "✗ 请提供目标主机或分组，例如：sshops exec --host 10.0.0.1 \"uname -a\" 或 sshops exec --group prod \"uptime\"")
 			os.Exit(1)
 		}
 
-		proxies, err := parseProxyChain(execProxy, execUser, execKey, execPassword)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, err.Error())
-			os.Exit(1)
-		}
-		client.Proxies = proxies
-
-		if err := client.Connect(); err != nil {
-			fmt.Fprintln(os.Stderr, humanizeError(err, execHost, execPort, execTimeout, execKey))
-			os.Exit(1)
-		}
-
-		start := time.Now()
-		exitCode, err := client.Run(command)
-		duration := time.Since(start).Round(time.Millisecond)
-
-		if err != nil {
-			fmt.Fprintln(os.Stderr, humanizeError(err, execHost, execPort, execTimeout, execKey))
-			os.Exit(1)
-		}
-
-		if exitCode == 0 {
-			color.New(color.FgGreen).Printf("✓ exit %d  duration %s\n", exitCode, duration)
-			os.Exit(0)
-		}
-
-		color.New(color.FgRed).Printf("✗ exit %d  duration %s\n", exitCode, duration)
-		os.Exit(exitCode)
+		execBatchHosts(cmd, cfg, command)
 	},
 }
 
@@ -104,6 +70,211 @@ func init() {
 	execCmd.Flags().StringVar(&execPassword, "password", "", "SSH 密码")
 	execCmd.Flags().IntVar(&execTimeout, "timeout", 0, "连接超时秒数")
 	execCmd.Flags().StringVarP(&execProxy, "proxy", "P", "", "跳板机，格式 user@host:port，多跳用逗号分隔")
+	execCmd.Flags().StringVarP(&execGroup, "group", "g", "", "按分组批量执行")
+	execCmd.Flags().StringVar(&execTag, "tag", "", "按标签过滤批量执行（配合 --group 使用）")
+}
+
+func execSingleHost(cmd *cobra.Command, cfg *config.Config, command string) {
+	client := sshclient.NewClient(execHost, execPort, execUser, execTimeout)
+
+	if execKey != "" {
+		if err := client.WithKey(execKey); err != nil {
+			fmt.Fprintln(os.Stderr, humanizeError(err, execHost, execPort, execTimeout, execKey))
+			os.Exit(1)
+		}
+	} else if execPassword != "" {
+		if err := client.WithPassword(execPassword); err != nil {
+			fmt.Fprintln(os.Stderr, "✗ 认证设置失败：无法使用密码认证")
+			os.Exit(1)
+		}
+	} else {
+		fmt.Fprintln(os.Stderr, "✗ 认证失败：请提供 --key 或 --password")
+		os.Exit(1)
+	}
+
+	proxies, err := parseProxyChain(execProxy, execUser, execKey, execPassword)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err.Error())
+		os.Exit(1)
+	}
+	client.Proxies = proxies
+
+	if err := client.Connect(); err != nil {
+		fmt.Fprintln(os.Stderr, humanizeError(err, execHost, execPort, execTimeout, execKey))
+		os.Exit(1)
+	}
+
+	start := time.Now()
+	exitCode, err := client.Run(command)
+	duration := time.Since(start).Round(time.Millisecond)
+
+	if err != nil {
+		fmt.Fprintln(os.Stderr, humanizeError(err, execHost, execPort, execTimeout, execKey))
+		os.Exit(1)
+	}
+
+	if exitCode == 0 {
+		color.New(color.FgGreen).Printf("✓ exit %d  duration %s\n", exitCode, duration)
+		os.Exit(0)
+	}
+
+	color.New(color.FgRed).Printf("✗ exit %d  duration %s\n", exitCode, duration)
+	os.Exit(exitCode)
+}
+
+func execBatchHosts(cmd *cobra.Command, cfg *config.Config, command string) {
+	inv, err := inventory.Load(cfg.InventoryPath)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "✗ 加载主机清单失败：请检查 inventory 文件格式")
+		os.Exit(1)
+	}
+
+	hosts := inventory.FilterByGroupAndTags(inv.List(), execGroup, execTag)
+	if len(hosts) == 0 {
+		fmt.Fprintln(os.Stderr, "✗ 未找到匹配的主机，请检查分组或标签")
+		os.Exit(1)
+	}
+
+	v := unlockVaultOptional(cfg.VaultPath)
+	if v != nil {
+		defer v.Lock()
+	}
+
+	total := len(hosts)
+	success := 0
+	failed := 0
+	startAll := time.Now()
+
+	for _, h := range hosts {
+		if h == nil {
+			continue
+		}
+
+		fmt.Printf("--- [%s] %s ---\n", h.Name, h.Host)
+
+		hostPort := h.Port
+		if hostPort <= 0 {
+			hostPort = cfg.DefaultPort
+		}
+		hostUser := strings.TrimSpace(h.User)
+		if hostUser == "" {
+			hostUser = cfg.DefaultUser
+		}
+		hostTimeout := execTimeout
+		if hostTimeout <= 0 {
+			hostTimeout = cfg.ConnectTimeout
+		}
+
+		cred := findVaultCredential(v, h.Name)
+		keyPath, password := resolveBatchAuth(cmd, cfg, h, cred)
+		proxyChain := strings.TrimSpace(h.ProxyChain)
+		if cmd.Flags().Changed("proxy") {
+			proxyChain = strings.TrimSpace(execProxy)
+		}
+
+		client := sshclient.NewClient(h.Host, hostPort, hostUser, hostTimeout)
+		proxies, proxyErr := parseProxyChain(proxyChain, hostUser, keyPath, password)
+		if proxyErr != nil {
+			fmt.Fprintf(os.Stderr, "%s\n", proxyErr.Error())
+			failed++
+			continue
+		}
+		client.Proxies = proxies
+
+		authErr := configureClientAuth(client, keyPath, password)
+		if authErr != nil {
+			fmt.Fprintf(os.Stderr, "%s\n", humanizeError(authErr, h.Host, hostPort, hostTimeout, keyPath))
+			failed++
+			continue
+		}
+
+		if err := client.Connect(); err != nil {
+			fmt.Fprintf(os.Stderr, "%s\n", humanizeError(err, h.Host, hostPort, hostTimeout, keyPath))
+			failed++
+			continue
+		}
+
+		exitCode, runErr := client.RunWithPrefix(command, h.Name)
+		if runErr != nil {
+			fmt.Fprintf(os.Stderr, "%s\n", humanizeError(runErr, h.Host, hostPort, hostTimeout, keyPath))
+			failed++
+			continue
+		}
+		if exitCode == 0 {
+			success++
+		} else {
+			failed++
+		}
+	}
+
+	duration := time.Since(startAll).Round(100 * time.Millisecond)
+	if failed == 0 {
+		fmt.Printf("✓ %d/%d 成功  耗时 %s\n", success, total, duration)
+		os.Exit(0)
+	}
+
+	fmt.Printf("✓ %d/%d 成功  ✗ %d/%d 失败  耗时 %s\n", success, total, failed, total, duration)
+	os.Exit(1)
+}
+
+func resolveBatchAuth(cmd *cobra.Command, cfg *config.Config, h *inventory.Host, cred *vault.Credential) (keyPath string, password string) {
+	if cmd.Flags().Changed("key") && strings.TrimSpace(execKey) != "" {
+		keyPath = strings.TrimSpace(execKey)
+	} else {
+		keyPath = strings.TrimSpace(h.KeyPath)
+		if keyPath == "" && cred != nil && strings.TrimSpace(cred.KeyPath) != "" {
+			keyPath = strings.TrimSpace(cred.KeyPath)
+		}
+	}
+
+	if cmd.Flags().Changed("password") && strings.TrimSpace(execPassword) != "" {
+		password = strings.TrimSpace(execPassword)
+	} else if cred != nil && keyPath == "" && strings.TrimSpace(cred.Password) != "" {
+		password = strings.TrimSpace(cred.Password)
+	}
+
+	if keyPath == "" && password == "" {
+		keyPath = cfg.DefaultKeyPath
+	}
+	return keyPath, password
+}
+
+func configureClientAuth(client *sshclient.Client, keyPath string, password string) error {
+	if strings.TrimSpace(keyPath) != "" {
+		return client.WithKey(keyPath)
+	}
+	if strings.TrimSpace(password) != "" {
+		return client.WithPassword(password)
+	}
+	return sshclient.ErrAuthFailed
+}
+
+func findVaultCredential(v *vault.Vault, name string) *vault.Credential {
+	if v == nil {
+		return nil
+	}
+	cred, err := v.Get(name)
+	if err != nil {
+		return nil
+	}
+	return cred
+}
+
+func unlockVaultOptional(path string) *vault.Vault {
+	v := vault.NewVault(path)
+	master, err := readSecret("请输入 Vault 主密码：")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "⚠ Vault 解锁失败：无法读取主密码，已跳过")
+		return nil
+	}
+	if strings.TrimSpace(master) == "" {
+		return nil
+	}
+	if err := v.Unlock(master); err != nil {
+		fmt.Fprintln(os.Stderr, "⚠ Vault 解锁失败：已跳过 Vault 凭据")
+		return nil
+	}
+	return v
 }
 
 func applyExecDefaults(cmd *cobra.Command, cfg *config.Config) {

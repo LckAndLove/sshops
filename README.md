@@ -25,3 +25,22 @@ go build -o sshops .          # Linux/macOS
 
 # 多跳跳板机
 .\sshops.exe exec --host 10.10.0.5 --proxy "root@jump1.com:22,root@jump2.com:22" --key ~/.ssh/id_rsa "df -h"
+
+# Phase 2 测试
+# 添加主机
+.\sshops.exe inventory add --name prod-01 --host 159.223.50.31 --user root --key C:\Users\91838\.ssh\id_ed25519 --group prod,web --tag env=prod,role=web
+
+# 列出所有主机
+.\sshops.exe inventory list
+
+# 查看单台主机
+.\sshops.exe inventory show --name prod-01
+
+# 按分组批量执行
+.\sshops.exe exec --group prod "uptime"
+
+# 按标签过滤执行
+.\sshops.exe exec --tag env=prod "df -h"
+
+# 删除主机
+.\sshops.exe inventory remove --name prod-01
