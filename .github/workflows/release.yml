@@ -59,7 +59,10 @@ jobs:
             (cd dist && zip -9 "${{ matrix.binary_name }}.zip" "${{ matrix.binary_name }}")
           else
             chmod +x "dist/${{ matrix.binary_name }}"
-            tar -C dist -czf "dist/${{ matrix.binary_name }}.tar.gz" "${{ matrix.binary_name }}"
+            ARTIFACT_DIR="$PWD/dist"
+            mkdir -p "$ARTIFACT_DIR"
+            cd dist
+            tar -czf "$ARTIFACT_DIR/${{ matrix.binary_name }}.tar.gz" "${{ matrix.binary_name }}"
           fi
 
       - name: Upload artifact
