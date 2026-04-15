@@ -61,3 +61,31 @@ go build -o sshops .          # Linux/macOS
 
 # 验证下载文件存在
 ls .\README_remote.md
+
+# Phase 4 MCP Server
+
+## Claude Desktop 配置（stdio 模式）
+
+编辑 %APPDATA%\Claude\claude_desktop_config.json：
+{
+  "mcpServers": {
+    "sshops": {
+      "command": "C:\\path\\to\\sshops.exe",
+      "args": ["mcp", "serve", "--vault-password", "your-password"]
+    }
+  }
+}
+
+## Claude Code 配置（stdio 模式）
+
+claude mcp add sshops -- C:\path\to\sshops.exe mcp serve
+
+## SSE 模式（团队共享）
+
+.\sshops.exe mcp serve --transport sse --port 3000
+
+## 测试 MCP（stdio 手动测试）
+
+echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test","version":"1.0"}}}' | .\sshops.exe mcp serve
+
+echo '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' | .\sshops.exe mcp serve
