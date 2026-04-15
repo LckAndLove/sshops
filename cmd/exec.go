@@ -110,24 +110,67 @@ func init() {
 }
 
 func execSingleHost(cmd *cobra.Command, cfg *config.Config, command string) {
-	client := sshclient.NewClient(execHost, execPort, execUser, execTimeout)
+	// Try to look up host in inventory by name first
+	inv, _ := inventory.Load(cfg.InventoryPath)
+	var invHost *inventory.Host
+	if inv != nil {
+		invHost, _ = inv.Get(execHost)
+	}
 
-	if execKey != "" {
-		if err := client.WithKey(execKey); err != nil {
-			fmt.Fprintln(os.Stderr, humanizeError(err, execHost, execPort, execTimeout, execKey))
+	// Resolve effective host address (IP), port, user, key, password
+	hostAddr := execHost
+	port := execPort
+	user := execUser
+	keyPath := execKey
+	password := execPassword
+	keyFlagChanged := cmd.Flags().Lookup("key") != nil && cmd.Flags().Lookup("key").Changed
+
+	if invHost != nil {
+		// Host found in inventory - use its address and defaults
+		hostAddr = invHost.Host
+		if port <= 0 && !cmd.Flags().Changed("port") {
+			port = invHost.Port
+		}
+		if user == "" && !cmd.Flags().Changed("user") {
+			user = invHost.User
+		}
+		// Apply credential resolution priority
+		resolvedKey, resolvedPassword := resolveHostAuth(cfg, invHost, keyFlagChanged)
+		if keyPath == "" && !cmd.Flags().Changed("key") {
+			keyPath = resolvedKey
+		}
+		if password == "" && !cmd.Flags().Changed("password") {
+			password = resolvedPassword
+		}
+	}
+
+	// Fallback defaults if still empty
+	if port <= 0 {
+		port = cfg.DefaultPort
+	}
+	if user == "" {
+		user = cfg.DefaultUser
+	}
+
+	client := sshclient.NewClient(hostAddr, port, user, execTimeout)
+
+	if keyPath != "" && password == "" {
+		if err := client.WithKey(keyPath); err != nil {
+			fmt.Fprintln(os.Stderr, humanizeError(err, hostAddr, port, execTimeout, keyPath))
 			os.Exit(1)
 		}
-	} else if execPassword != "" {
-		if err := client.WithPassword(execPassword); err != nil {
+	} else if password != "" {
+		if err := client.WithPassword(password); err != nil {
 			fmt.Fprintln(os.Stderr, "✗ 认证设置失败：无法使用密码认证")
 			os.Exit(1)
 		}
 	} else {
-		fmt.Fprintln(os.Stderr, "✗ 认证失败：请提供 --key 或 --password")
+		// No credential available - fail
+		fmt.Fprintln(os.Stderr, "✗ 认证失败：无法找到可用凭据，请检查 inventory 配置或提供 --key/--password")
 		os.Exit(1)
 	}
 
-	proxies, err := parseProxyChain(execProxy, execUser, execKey, execPassword)
+	proxies, err := parseProxyChain(execProxy, user, keyPath, password)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err.Error())
 		os.Exit(1)
@@ -135,7 +178,7 @@ func execSingleHost(cmd *cobra.Command, cfg *config.Config, command string) {
 	client.Proxies = proxies
 
 	if err := client.Connect(); err != nil {
-		fmt.Fprintln(os.Stderr, humanizeError(err, execHost, execPort, execTimeout, execKey))
+		fmt.Fprintln(os.Stderr, humanizeError(err, hostAddr, port, execTimeout, keyPath))
 		os.Exit(1)
 	}
 
@@ -144,7 +187,7 @@ func execSingleHost(cmd *cobra.Command, cfg *config.Config, command string) {
 	duration := time.Since(start).Round(time.Millisecond)
 
 	if err != nil {
-		fmt.Fprintln(os.Stderr, humanizeError(err, execHost, execPort, execTimeout, execKey))
+		fmt.Fprintln(os.Stderr, humanizeError(err, hostAddr, port, execTimeout, keyPath))
 		os.Exit(1)
 	}
 
@@ -249,6 +292,38 @@ func resolveTaskAuth(cfg *config.Config, h *inventory.Host, cred *vault.Credenti
 	}
 	if password == "" && strings.TrimSpace(execPassword) != "" {
 		password = strings.TrimSpace(execPassword)
+	}
+
+	return keyPath, password
+}
+
+func resolveHostAuth(cfg *config.Config, h *inventory.Host, userSpecifiedKey bool) (string, string) {
+	keyPath := ""
+	password := ""
+
+	v := unlockVaultOptional(cfg.VaultPath)
+	var cred *vault.Credential
+	if v != nil {
+		cred = findVaultCredential(v, h.Name)
+		v.Lock()
+	}
+
+	// KeyPath 优先级：--key flag > vault > inventory host > config default
+	if userSpecifiedKey {
+		keyPath = strings.TrimSpace(execKey)
+	} else if cred != nil && strings.TrimSpace(cred.KeyPath) != "" {
+		keyPath = strings.TrimSpace(cred.KeyPath)
+	} else if h != nil && strings.TrimSpace(h.KeyPath) != "" {
+		keyPath = strings.TrimSpace(h.KeyPath)
+	} else {
+		keyPath = strings.TrimSpace(cfg.DefaultKeyPath)
+		if keyPath == "" {
+			keyPath = "id_rsa"
+		}
+	}
+
+	if cred != nil && strings.TrimSpace(cred.Password) != "" {
+		password = strings.TrimSpace(cred.Password)
 	}
 
 	return keyPath, password
