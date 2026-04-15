@@ -37,7 +37,7 @@ var playbookRunCmd = &cobra.Command{
 	Short: "执行 playbook 文件",
 	Args:  cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
-		pb, err := playbook.Load(strings.TrimSpace(args[0]))
+		pb, err := playbook.Resolve(strings.TrimSpace(args[0]))
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "✗ 加载 playbook 失败：%s\n", err.Error())
 			os.Exit(1)
