@@ -333,7 +333,7 @@ func (s *Server) toolGetMetrics(args map[string]interface{}) (string, error) {
 		cmd   string
 	}{
 		{"CPU", "top -bn1 | grep \"Cpu(s)\" | awk '{print $2}'"},
-		{"MEM", "free -h | awk '/^Mem:/{print $2,$3,$4}'"},
+		{"MEM", "free -m | awk '/^Mem:/{print $2,$3,$7}'"},
 		{"DISK", "df -h | grep -v tmpfs"},
 		{"LOAD", "uptime"},
 		{"PROC", "ps aux | wc -l"},
@@ -348,9 +348,11 @@ func (s *Server) toolGetMetrics(args map[string]interface{}) (string, error) {
 		values[item.label] = out
 	}
 
+	// Parse memory: total used free (in MB) and calculate percentage
+	memOutput := extractStdout(values["MEM"])
 	metrics := map[string]string{
+		"memory": formatMemory(memOutput),
 		"cpu":    extractStdout(values["CPU"]),
-		"memory": extractStdout(values["MEM"]),
 		"disk":   extractStdout(values["DISK"]),
 		"load":   extractStdout(values["LOAD"]),
 		"proc":   extractStdout(values["PROC"]),
@@ -542,6 +544,21 @@ func extractStdout(execResult string) string {
 		part = part[:stderrIdx]
 	}
 	return strings.TrimSpace(part)
+}
+
+func formatMemory(memOutput string) string {
+	parts := strings.Fields(memOutput)
+	if len(parts) < 3 {
+		return memOutput
+	}
+	total, _ := strconv.Atoi(parts[0])
+	used, _ := strconv.Atoi(parts[1])
+	available, _ := strconv.Atoi(parts[2])
+	var pct float64
+	if total > 0 {
+		pct = float64(total-available) / float64(total) * 100
+	}
+	return fmt.Sprintf("总计: %dMB  已用: %dMB  可用: %dMB  使用率: %.1f%%", total, used, available, pct)
 }
 
 func (s *Server) resolveHost(hostArg string) (*inventory.Host, error) {

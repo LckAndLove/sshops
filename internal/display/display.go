@@ -158,6 +158,13 @@ func PrintMetricsCard(host string, metrics map[string]string) {
 		if !ok {
 			continue
 		}
+
+		if k == "memory" && strings.Contains(raw, "总计:") {
+			// Pre-formatted memory string with MB values
+			fmt.Printf("| %s |\n", raw)
+			continue
+		}
+
 		pct := parsePercent(raw)
 		bar := makeBar(pct)
 		fmt.Printf("| %-8s [%s] %6.1f%% |\n", strings.ToUpper(k), bar, pct)
