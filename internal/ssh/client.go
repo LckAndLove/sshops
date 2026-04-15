@@ -1,15 +1,17 @@
 package ssh
 
 import (
+	"bufio"
 	"errors"
 	"fmt"
-	"net"
+	"io"
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
-	"time"
 
+	"github.com/fatih/color"
 	gossh "golang.org/x/crypto/ssh"
 	"golang.org/x/term"
 )
@@ -24,12 +26,18 @@ var (
 	ErrCommandRunFailed   = errors.New("command run failed")
 )
 
+var streamPrintMu sync.Mutex
+
 type Client struct {
 	Host    string
 	Port    int
 	User    string
 	Timeout int
+	Proxies []ProxyConfig
+	poolKey string
+
 	client  *gossh.Client
+	session *gossh.Session
 	auth    []gossh.AuthMethod
 }
 
@@ -87,64 +95,163 @@ func (c *Client) Connect() error {
 		return ErrAuthFailed
 	}
 
-	addr := net.JoinHostPort(c.Host, strconv.Itoa(c.Port))
-	sshConfig := &gossh.ClientConfig{
-		User:            c.User,
-		Auth:            c.auth,
-		Timeout:         time.Duration(c.Timeout) * time.Second,
-		HostKeyCallback: gossh.InsecureIgnoreHostKey(), // TODO: 生产环境需验证 host key。
+	c.poolKey = fmt.Sprintf("%s@%s:%d", c.User, c.Host, c.Port)
+	if pooled := GlobalPool.Get(c.poolKey); pooled != nil {
+		c.client = pooled
+		return nil
 	}
 
-	client, err := gossh.Dial("tcp", addr, sshConfig)
+	client, err := DialWithProxy(c.Proxies, c.Host, c.Port, c.User, c.auth, c.Timeout)
 	if err != nil {
-		msg := strings.ToLower(err.Error())
-		switch {
-		case strings.Contains(msg, "unable to authenticate"):
-			return ErrAuthFailed
-		case strings.Contains(msg, "i/o timeout") || strings.Contains(msg, "connection timed out"):
-			return ErrConnectTimeout
-		case strings.Contains(msg, "connection refused"):
-			return ErrConnectionRefused
-		default:
-			return ErrConnectFailed
-		}
+		GlobalPool.Remove(c.poolKey)
+		return err
 	}
 
 	c.client = client
 	return nil
 }
 
-func (c *Client) Run(command string) (exitCode int, err error) {
+func (c *Client) Run(command string) (int, error) {
+	return c.run(command, "")
+}
+
+func (c *Client) RunWithPrefix(command string, prefix string) (int, error) {
+	return c.run(command, prefix)
+}
+
+func (c *Client) run(command string, prefix string) (exitCode int, err error) {
 	if c.client == nil {
 		return 1, ErrCommandRunFailed
 	}
-	defer c.Close()
+	if strings.TrimSpace(command) == "" {
+		return 1, ErrCommandRunFailed
+	}
 
 	session, err := c.client.NewSession()
 	if err != nil {
+		c.CloseForce()
 		return 1, ErrCommandRunFailed
 	}
-	defer session.Close()
+	c.session = session
 
-	session.Stdout = os.Stdout
-	session.Stderr = os.Stderr
+	stdoutPipe, err := session.StdoutPipe()
+	if err != nil {
+		c.CloseForce()
+		return 1, ErrCommandRunFailed
+	}
+	stderrPipe, err := session.StderrPipe()
+	if err != nil {
+		c.CloseForce()
+		return 1, ErrCommandRunFailed
+	}
 
-	err = session.Run(command)
-	if err == nil {
+	if err := session.Start(command); err != nil {
+		c.CloseForce()
+		return 1, ErrCommandRunFailed
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	go func() {
+		defer wg.Done()
+		streamLines(stdoutPipe, false, prefix)
+	}()
+
+	go func() {
+		defer wg.Done()
+		streamLines(stderrPipe, true, prefix)
+	}()
+
+	wg.Wait()
+	waitErr := session.Wait()
+
+	_ = c.Close()
+
+	if waitErr == nil {
 		return 0, nil
 	}
 
 	var exitErr *gossh.ExitError
-	if errors.As(err, &exitErr) {
+	if errors.As(waitErr, &exitErr) {
 		return exitErr.ExitStatus(), nil
 	}
 
+	c.CloseForce()
 	return 1, ErrCommandRunFailed
 }
 
-func (c *Client) Close() {
+func (c *Client) Close() error {
+	if c.session != nil {
+		_ = c.session.Close()
+		c.session = nil
+	}
+	if c.client != nil && c.poolKey != "" {
+		GlobalPool.Put(c.poolKey, c.client)
+	}
+	return nil
+}
+
+func (c *Client) CloseForce() {
+	if c.session != nil {
+		_ = c.session.Close()
+		c.session = nil
+	}
 	if c.client != nil {
 		_ = c.client.Close()
-		c.client = nil
 	}
+	if c.poolKey != "" {
+		GlobalPool.Remove(c.poolKey)
+	}
+	c.client = nil
+}
+
+func streamLines(reader io.Reader, isStderr bool, prefix string) {
+	scanner := bufio.NewScanner(reader)
+	buf := make([]byte, 0, 64*1024)
+	scanner.Buffer(buf, 1024*1024)
+
+	for scanner.Scan() {
+		printLine(scanner.Text(), isStderr, prefix)
+	}
+}
+
+func printLine(line string, isStderr bool, prefix string) {
+	streamPrintMu.Lock()
+	defer streamPrintMu.Unlock()
+
+	white := color.New(color.FgWhite)
+	yellow := color.New(color.FgYellow)
+	cyan := color.New(color.FgCyan)
+
+	if prefix == "" {
+		if isStderr {
+			yellow.Fprintln(color.Output, line)
+			return
+		}
+		white.Fprintln(color.Output, line)
+		return
+	}
+
+	prefixText := "[" + prefix + "] "
+	if isStderr {
+		yellow.Fprint(color.Output, prefixText)
+		yellow.Fprintln(color.Output, line)
+		return
+	}
+
+	cyan.Fprint(color.Output, prefixText)
+	white.Fprintln(color.Output, line)
+}
+
+func IsProxyHopError(err error) (*ProxyHopError, bool) {
+	var hopErr *ProxyHopError
+	if errors.As(err, &hopErr) {
+		return hopErr, true
+	}
+	return nil, false
+}
+
+func BuildAddr(host string, port int) string {
+	return host + ":" + strconv.Itoa(port)
 }

@@ -3,7 +3,9 @@ package cmd
 import (
 	"errors"
 	"fmt"
+	"net"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -21,6 +23,7 @@ var (
 	execKey      string
 	execPassword string
 	execTimeout  int
+	execProxy    string
 )
 
 var execCmd = &cobra.Command{
@@ -60,6 +63,13 @@ var execCmd = &cobra.Command{
 			os.Exit(1)
 		}
 
+		proxies, err := parseProxyChain(execProxy, execUser, execKey, execPassword)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err.Error())
+			os.Exit(1)
+		}
+		client.Proxies = proxies
+
 		if err := client.Connect(); err != nil {
 			fmt.Fprintln(os.Stderr, humanizeError(err, execHost, execPort, execTimeout, execKey))
 			os.Exit(1)
@@ -93,6 +103,7 @@ func init() {
 	execCmd.Flags().StringVarP(&execKey, "key", "i", "", "SSH 私钥路径")
 	execCmd.Flags().StringVar(&execPassword, "password", "", "SSH 密码")
 	execCmd.Flags().IntVar(&execTimeout, "timeout", 0, "连接超时秒数")
+	execCmd.Flags().StringVarP(&execProxy, "proxy", "P", "", "跳板机，格式 user@host:port，多跳用逗号分隔")
 }
 
 func applyExecDefaults(cmd *cobra.Command, cfg *config.Config) {
@@ -121,6 +132,10 @@ func applyExecDefaults(cmd *cobra.Command, cfg *config.Config) {
 }
 
 func humanizeError(err error, host string, port int, timeout int, keyPath string) string {
+	if hopErr, ok := sshclient.IsProxyHopError(err); ok {
+		return fmt.Sprintf("✗ 跳板机连接失败（第%d跳 %s）：%s", hopErr.Hop, hopErr.Node, proxyReasonToChinese(hopErr.Reason))
+	}
+
 	switch {
 	case errors.Is(err, sshclient.ErrPrivateKeyNotFound):
 		return fmt.Sprintf("✗ 私钥文件不存在：%s", keyPath)
@@ -139,4 +154,98 @@ func humanizeError(err error, host string, port int, timeout int, keyPath string
 	default:
 		return "✗ 操作失败：请检查网络、认证信息和主机配置"
 	}
+}
+
+func proxyReasonToChinese(err error) string {
+	switch {
+	case errors.Is(err, sshclient.ErrAuthFailed):
+		return "认证失败"
+	case errors.Is(err, sshclient.ErrConnectTimeout):
+		return "连接超时"
+	case errors.Is(err, sshclient.ErrConnectionRefused):
+		return "连接被拒绝"
+	default:
+		return "连接失败"
+	}
+}
+
+func parseProxyChain(raw string, defaultUser string, keyPath string, password string) ([]sshclient.ProxyConfig, error) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return nil, nil
+	}
+
+	segments := strings.Split(trimmed, ",")
+	proxies := make([]sshclient.ProxyConfig, 0, len(segments))
+	for _, seg := range segments {
+		item := strings.TrimSpace(seg)
+		if item == "" {
+			return nil, errors.New("✗ 跳板机参数格式错误：存在空的跳板机配置")
+		}
+
+		user := defaultUser
+		hostPort := item
+		if strings.Contains(item, "@") {
+			parts := strings.SplitN(item, "@", 2)
+			if strings.TrimSpace(parts[0]) != "" {
+				user = strings.TrimSpace(parts[0])
+			}
+			hostPort = strings.TrimSpace(parts[1])
+		}
+		if user == "" {
+			return nil, fmt.Errorf("✗ 跳板机参数格式错误：%s 缺少用户名", item)
+		}
+
+		host, port, err := splitHostPortWithDefault(hostPort, 22)
+		if err != nil {
+			return nil, fmt.Errorf("✗ 跳板机参数格式错误：%s", item)
+		}
+
+		proxies = append(proxies, sshclient.ProxyConfig{
+			Host:     host,
+			Port:     port,
+			User:     user,
+			KeyPath:  keyPath,
+			Password: password,
+		})
+	}
+	return proxies, nil
+}
+
+func splitHostPortWithDefault(hostPort string, defaultPort int) (string, int, error) {
+	value := strings.TrimSpace(hostPort)
+	if value == "" {
+		return "", 0, errors.New("empty host")
+	}
+
+	if strings.Contains(value, ":") {
+		host, portStr, err := net.SplitHostPort(value)
+		if err == nil {
+			port, parseErr := strconv.Atoi(portStr)
+			if parseErr != nil || port <= 0 {
+				return "", 0, errors.New("invalid port")
+			}
+			if strings.TrimSpace(host) == "" {
+				return "", 0, errors.New("invalid host")
+			}
+			return host, port, nil
+		}
+
+		lastColon := strings.LastIndex(value, ":")
+		if lastColon <= 0 || lastColon >= len(value)-1 {
+			return "", 0, errors.New("invalid host:port")
+		}
+		host = strings.TrimSpace(value[:lastColon])
+		portStr = strings.TrimSpace(value[lastColon+1:])
+		port, parseErr := strconv.Atoi(portStr)
+		if parseErr != nil || port <= 0 {
+			return "", 0, errors.New("invalid port")
+		}
+		if host == "" {
+			return "", 0, errors.New("invalid host")
+		}
+		return host, port, nil
+	}
+
+	return value, defaultPort, nil
 }
