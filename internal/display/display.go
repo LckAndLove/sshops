@@ -21,6 +21,8 @@ type PlaybookHostResult struct {
 }
 
 func PrintHostTable(hosts []*inventory.Host) {
+	fmt.Printf("共 %d 台主机\n\n", len(hosts))
+
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(w, "NAME\tHOST\tPORT\tUSER\tGROUPS\tTAGS")
 	fmt.Fprintln(w, "----\t----\t----\t----\t------\t----")
@@ -37,10 +39,9 @@ func PrintHostTable(hosts []*inventory.Host) {
 
 		groups := strings.Join(h.Groups, ",")
 		tagText := strings.Join(tags, ",")
-		nameText := color.New(color.FgGreen).Sprint(" *") + " " + h.Name
 
 		fmt.Fprintf(w, "%s\t%s\t%d\t%s\t%s\t%s\n",
-			nameText, h.Host, h.Port, h.User, groups, tagText)
+			h.Name, h.Host, h.Port, h.User, groups, tagText)
 	}
 	w.Flush()
 }
