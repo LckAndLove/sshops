@@ -213,9 +213,23 @@ func execBatchHosts(cfg *config.Config, command string, userSpecifiedKey bool) {
 		os.Exit(1)
 	}
 
-	v := unlockVaultOptional(cfg.VaultPath)
-	if v != nil {
-		defer v.Lock()
+	// Only unlock vault if at least one host has no KeyPath and no --key flag
+	needsVault := false
+	if !userSpecifiedKey {
+		for _, h := range hosts {
+			if h != nil && strings.TrimSpace(h.KeyPath) == "" {
+				needsVault = true
+				break
+			}
+		}
+	}
+
+	var v *vault.Vault
+	if needsVault {
+		v = unlockVaultOptional(cfg.VaultPath)
+		if v != nil {
+			defer v.Lock()
+		}
 	}
 
 	tasks := make([]runner.Task, 0, len(hosts))
