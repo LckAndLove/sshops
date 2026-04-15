@@ -37,7 +37,7 @@ func PrintHostTable(hosts []*inventory.Host) {
 
 		groups := strings.Join(h.Groups, ",")
 		tagText := strings.Join(tags, ",")
-		nameText := "* " + h.Name
+		nameText := color.New(color.FgGreen).Sprint(" *") + " " + h.Name
 
 		fmt.Fprintf(w, "%s\t%s\t%d\t%s\t%s\t%s\n",
 			nameText, h.Host, h.Port, h.User, groups, tagText)
@@ -80,14 +80,14 @@ func PrintExecResult(results []runner.Result) {
 
 	total := len(results)
 	if failedCount > 0 {
-		fmt.Printf("OK %d/%d   FAIL %d/%d   total %s\n",
-			okCount, total,
-			failedCount, total,
+		fmt.Printf("%s %d/%d   %s %d/%d   total %s\n",
+			color.New(color.FgGreen).Sprint("OK"), okCount, total,
+			color.New(color.FgRed).Sprint("FAIL"), failedCount, total,
 			formatDuration(totalDuration),
 		)
 	} else {
-		fmt.Printf("OK %d/%d   total %s\n",
-			okCount, total,
+		fmt.Printf("%s %d/%d   total %s\n",
+			color.New(color.FgGreen).Sprint("OK"), okCount, total,
 			formatDuration(totalDuration),
 		)
 	}
