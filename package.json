@@ -1,0 +1,30 @@
+{
+  "name": "sshops-mcp",
+  "version": "0.2.1",
+  "description": "MCP launcher for sshops (for Claude Code and Codex)",
+  "license": "MIT",
+  "type": "commonjs",
+  "bin": {
+    "sshops-mcp": "bin/sshops-mcp.js"
+  },
+  "files": [
+    "bin",
+    "bundle",
+    "README.npm.md"
+  ],
+  "keywords": [
+    "mcp",
+    "ssh",
+    "ops",
+    "claude",
+    "codex"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/LckAndLove/sshops.git"
+  }
+}
+

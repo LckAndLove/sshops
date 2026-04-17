@@ -3,30 +3,40 @@ package mcp
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 )
 
 func RunStdio(server *Server) {
-	scanner := bufio.NewScanner(os.Stdin)
-	buf := make([]byte, 0, 64*1024)
-	scanner.Buffer(buf, 1024*1024)
+	reader := bufio.NewReader(os.Stdin)
+	writer := bufio.NewWriter(os.Stdout)
 
-	encoder := json.NewEncoder(os.Stdout)
-	for scanner.Scan() {
-		line := scanner.Bytes()
-		if len(line) == 0 {
+	for {
+		payload, err := readStdioPayload(reader)
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				return
+			}
+			fmt.Fprintf(os.Stderr, "MCP stdio 读取失败: %v\n", err)
+			return
+		}
+		if len(payload) == 0 {
 			continue
 		}
 
 		var req JSONRPCRequest
-		if err := json.Unmarshal(line, &req); err != nil {
+		if err := json.Unmarshal(payload, &req); err != nil {
 			resp := &JSONRPCResponse{JSONRPC: "2.0", Error: &RPCError{Code: -32600, Message: "Invalid Request"}}
-			_ = encoder.Encode(resp)
+			if wErr := writeStdioPayload(writer, resp); wErr != nil {
+				fmt.Fprintf(os.Stderr, "MCP stdio 响应写入失败: %v\n", wErr)
+				return
+			}
 			continue
 		}
 
@@ -34,14 +44,81 @@ func RunStdio(server *Server) {
 		if resp == nil {
 			continue
 		}
-		if err := encoder.Encode(resp); err != nil {
+		if err := writeStdioPayload(writer, resp); err != nil {
 			fmt.Fprintf(os.Stderr, "MCP stdio 响应写入失败: %v\n", err)
 			return
 		}
 	}
-	if err := scanner.Err(); err != nil && err != io.EOF {
-		fmt.Fprintf(os.Stderr, "MCP stdio 读取失败: %v\n", err)
+}
+
+func readStdioPayload(reader *bufio.Reader) ([]byte, error) {
+	for {
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			return nil, err
+		}
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+
+		trimmed := strings.TrimSpace(line)
+		lower := strings.ToLower(trimmed)
+		if strings.HasPrefix(lower, "content-length:") {
+			n, err := parseContentLength(trimmed)
+			if err != nil {
+				return nil, err
+			}
+
+			for {
+				headerLine, hErr := reader.ReadString('\n')
+				if hErr != nil {
+					return nil, hErr
+				}
+				if strings.TrimSpace(headerLine) == "" {
+					break
+				}
+			}
+
+			body := make([]byte, n)
+			if _, err := io.ReadFull(reader, body); err != nil {
+				return nil, err
+			}
+			return body, nil
+		}
+
+		// Fallback: line-delimited JSON for simple/manual clients.
+		return []byte(trimmed), nil
 	}
+}
+
+func parseContentLength(header string) (int, error) {
+	parts := strings.SplitN(header, ":", 2)
+	if len(parts) != 2 {
+		return 0, errors.New("invalid Content-Length header")
+	}
+	v, err := strconv.Atoi(strings.TrimSpace(parts[1]))
+	if err != nil || v <= 0 {
+		return 0, errors.New("invalid Content-Length value")
+	}
+	return v, nil
+}
+
+func writeStdioPayload(writer *bufio.Writer, resp *JSONRPCResponse) error {
+	if resp == nil {
+		return nil
+	}
+	payload, err := json.Marshal(resp)
+	if err != nil {
+		return err
+	}
+
+	if _, err := fmt.Fprintf(writer, "Content-Length: %d\r\n\r\n", len(payload)); err != nil {
+		return err
+	}
+	if _, err := writer.Write(payload); err != nil {
+		return err
+	}
+	return writer.Flush()
 }
 
 func RunSSE(server *Server, port int) {

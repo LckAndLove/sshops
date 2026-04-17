@@ -146,6 +146,50 @@ claude mcp add sshops -- /absolute/path/to/sshops mcp serve
 claude mcp add sshops -- /absolute/path/to/sshops mcp serve --transport stdio
 ```
 
+### npm 分发（推荐给 Claude Code / Codex 用户）
+
+如果你把 MCP 启动器发布到 npm（例如 `sshops-mcp`），用户可以直接通过 `npx` 接入：
+
+说明：npm 包可内置 `sshops` 二进制（如 `win32-x64`），用户无需提前安装 `sshops`，一条命令即可使用。
+
+标准分发模式建议：
+- 核心能力：继续使用 Go 二进制（`sshops`）
+- 用户分发：使用 Node/npm 包装器（`sshops-mcp`）
+
+这样可以同时保证 Go 的性能与可移植性，以及 npm 的标准化安装/升级体验。
+
+Claude Code:
+
+```bash
+claude mcp add sshops -- npx -y sshops-mcp@0.2.1
+```
+
+Codex:
+
+```bash
+codex mcp add sshops -- npx -y sshops-mcp@0.2.1
+```
+
+用户更新（Windows）：
+
+```powershell
+npm i -g sshops-mcp@latest; $bin=(npm prefix -g).Trim(); codex mcp remove sshops 2>$null; codex mcp add sshops -- "$bin\sshops-mcp.cmd"
+```
+
+用户更新（macOS/Linux）：
+
+```bash
+npm i -g sshops-mcp@latest && codex mcp remove sshops >/dev/null 2>&1 || true && codex mcp add sshops -- sshops-mcp
+```
+
+如需固定版本发布，请将 `@latest` 替换为指定版本（例如 `@0.2.1`）。
+
+如需传入 Vault 密码等参数，可在命令后追加：
+
+```bash
+npx -y sshops-mcp@0.2.1 -- --vault-password YOUR_VAULT_PASSWORD
+```
+
 ### Claude Desktop
 
 在 Claude Desktop 的 MCP 配置中加入如下服务定义：
@@ -288,3 +332,5 @@ Claude 会自动选择合适的 Playbook 或调用 batch_exec 执行。
 
 审计日志（Audit Logs）：
 - `sshops exec logs` 使用统一日志展示格式输出时间、主机、命令、退出码、耗时和操作人。
+
+
