@@ -24,24 +24,24 @@ Windows x64 includes a bundled `sshops.exe`, so users can usually start with one
 
 Codex:
 
-```bash
-codex mcp add sshops -- npx -y sshops-mcp@0.2.1
+```powershell
+npm i -g sshops-mcp@latest; $root=(npm root -g).Trim(); codex mcp remove sshops 2>$null; codex mcp add sshops -- "$root\sshops-mcp\bundle\win32-x64\sshops.exe" mcp serve --transport stdio; codex mcp list
 ```
 
 Claude Code:
 
-```bash
-claude mcp add sshops -- npx -y sshops-mcp@0.2.1
+```powershell
+npm i -g sshops-mcp@latest; $root=(npm root -g).Trim(); claude mcp remove sshops 2>$null; claude mcp add sshops -- "$root\sshops-mcp\bundle\win32-x64\sshops.exe" mcp serve --transport stdio; claude mcp list
 ```
 
-If you do not need version pinning, you can use `sshops-mcp` without `@0.2.1`.
+If you do not need version pinning, you can use `sshops-mcp` without `@0.2.2`.
 
 ## Update
 
 Windows:
 
 ```powershell
-npm i -g sshops-mcp@latest; $bin=(npm prefix -g).Trim(); codex mcp remove sshops 2>$null; codex mcp add sshops -- "$bin\sshops-mcp.cmd"
+npm i -g sshops-mcp@latest; $root=(npm root -g).Trim(); codex mcp remove sshops 2>$null; codex mcp add sshops -- "$root\sshops-mcp\bundle\win32-x64\sshops.exe" mcp serve --transport stdio
 ```
 
 macOS/Linux:
@@ -50,7 +50,7 @@ macOS/Linux:
 npm i -g sshops-mcp@latest && codex mcp remove sshops >/dev/null 2>&1 || true && codex mcp add sshops -- sshops-mcp
 ```
 
-If you want controlled rollout, replace `@latest` with a fixed version (for example `@0.2.1`).
+If you want controlled rollout, replace `@latest` with a fixed version (for example `@0.2.2`).
 
 ## Pass-through Args
 
@@ -59,7 +59,7 @@ Arguments after `--` are forwarded to `sshops mcp serve`.
 Example:
 
 ```bash
-npx -y sshops-mcp@0.2.1 -- --vault-password YOUR_PASSWORD
+npx -y sshops-mcp@0.2.2 -- --vault-password YOUR_PASSWORD
 ```
 
 ## Binary Resolution Order
@@ -75,5 +75,6 @@ At runtime, this launcher resolves `sshops` in order:
 
 - Bundled binary: `win32-x64`
 - Other platforms: install `sshops` in `PATH`, or set `SSHOPS_BIN`
+
 
 

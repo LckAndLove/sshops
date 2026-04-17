@@ -160,20 +160,20 @@ claude mcp add sshops -- /absolute/path/to/sshops mcp serve --transport stdio
 
 Claude Code:
 
-```bash
-claude mcp add sshops -- npx -y sshops-mcp@0.2.1
+```powershell
+npm i -g sshops-mcp@latest; $root=(npm root -g).Trim(); claude mcp remove sshops 2>$null; claude mcp add sshops -- "$root\sshops-mcp\bundle\win32-x64\sshops.exe" mcp serve --transport stdio; claude mcp list
 ```
 
 Codex:
 
-```bash
-codex mcp add sshops -- npx -y sshops-mcp@0.2.1
+```powershell
+npm i -g sshops-mcp@latest; $root=(npm root -g).Trim(); codex mcp remove sshops 2>$null; codex mcp add sshops -- "$root\sshops-mcp\bundle\win32-x64\sshops.exe" mcp serve --transport stdio; codex mcp list
 ```
 
 用户更新（Windows）：
 
 ```powershell
-npm i -g sshops-mcp@latest; $bin=(npm prefix -g).Trim(); codex mcp remove sshops 2>$null; codex mcp add sshops -- "$bin\sshops-mcp.cmd"
+npm i -g sshops-mcp@latest; $root=(npm root -g).Trim(); codex mcp remove sshops 2>$null; codex mcp add sshops -- "$root\sshops-mcp\bundle\win32-x64\sshops.exe" mcp serve --transport stdio
 ```
 
 用户更新（macOS/Linux）：
@@ -182,12 +182,12 @@ npm i -g sshops-mcp@latest; $bin=(npm prefix -g).Trim(); codex mcp remove sshops
 npm i -g sshops-mcp@latest && codex mcp remove sshops >/dev/null 2>&1 || true && codex mcp add sshops -- sshops-mcp
 ```
 
-如需固定版本发布，请将 `@latest` 替换为指定版本（例如 `@0.2.1`）。
+如需固定版本发布，请将 `@latest` 替换为指定版本（例如 `@0.2.2`）。
 
 如需传入 Vault 密码等参数，可在命令后追加：
 
 ```bash
-npx -y sshops-mcp@0.2.1 -- --vault-password YOUR_VAULT_PASSWORD
+npx -y sshops-mcp@0.2.2 -- --vault-password YOUR_VAULT_PASSWORD
 ```
 
 ### Claude Desktop
@@ -332,5 +332,6 @@ Claude 会自动选择合适的 Playbook 或调用 batch_exec 执行。
 
 审计日志（Audit Logs）：
 - `sshops exec logs` 使用统一日志展示格式输出时间、主机、命令、退出码、耗时和操作人。
+
 
 
