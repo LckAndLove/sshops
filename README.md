@@ -182,12 +182,12 @@ npm i -g sshops-mcp@latest; $root=(npm root -g).Trim(); codex mcp remove sshops 
 npm i -g sshops-mcp@latest && codex mcp remove sshops >/dev/null 2>&1 || true && codex mcp add sshops -- sshops-mcp
 ```
 
-如需固定版本发布，请将 `@latest` 替换为指定版本（例如 `@0.2.2`）。
+如需固定版本发布，请将 `@latest` 替换为指定版本（例如 `@0.2.6`）。
 
 如需传入 Vault 密码等参数，可在命令后追加：
 
 ```bash
-npx -y sshops-mcp@0.2.2 -- --vault-password YOUR_VAULT_PASSWORD
+npx -y sshops-mcp@0.2.6 -- --vault-password YOUR_VAULT_PASSWORD
 ```
 
 ### Claude Desktop

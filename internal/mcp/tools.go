@@ -843,8 +843,7 @@ func (s *Server) resolveCredential(h *inventory.Host, keyPathOverride string) (s
 	// 1. 参数传入的 key_path
 	// 2. host.KeyPath
 	// 3. host.Password
-	// 4. vault 密码
-	// 5. config.DefaultKeyPath
+	// 4. config.DefaultKeyPath
 	if strings.TrimSpace(keyPathOverride) != "" {
 		return strings.TrimSpace(keyPathOverride), ""
 	}
@@ -855,12 +854,7 @@ func (s *Server) resolveCredential(h *inventory.Host, keyPathOverride string) (s
 	if keyPath == "" && h != nil && strings.TrimSpace(h.Password) != "" {
 		password = strings.TrimSpace(h.Password)
 	}
-	if keyPath == "" && password == "" && s.vault != nil && h != nil {
-		if cred, err := s.vault.Get(h.Name); err == nil && cred != nil && strings.TrimSpace(cred.Password) != "" {
-			password = strings.TrimSpace(cred.Password)
-		}
-	}
-	if keyPath == "" {
+	if keyPath == "" && password == "" {
 		keyPath = strings.TrimSpace(s.config.DefaultKeyPath)
 	}
 

@@ -111,11 +111,7 @@ func writeStdioPayload(writer *bufio.Writer, resp *JSONRPCResponse) error {
 	if err != nil {
 		return err
 	}
-
-	if _, err := fmt.Fprintf(writer, "Content-Length: %d\r\n\r\n", len(payload)); err != nil {
-		return err
-	}
-	if _, err := writer.Write(payload); err != nil {
+	if _, err := fmt.Fprintf(writer, "%s\n", payload); err != nil {
 		return err
 	}
 	return writer.Flush()
