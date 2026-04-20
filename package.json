@@ -1,6 +1,6 @@
 {
   "name": "sshops-mcp",
-  "version": "0.2.6",
+  "version": "0.2.7",
   "description": "MCP launcher for sshops (for Claude Code and Codex)",
   "author": "LckAndLove",
   "license": "MIT",
@@ -32,4 +32,5 @@
     "url": "https://github.com/LckAndLove/sshops/issues"
   }
 }
+
 
