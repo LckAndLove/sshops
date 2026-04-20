@@ -20,7 +20,6 @@ import (
 	"github.com/yourname/sshops/internal/playbook"
 	execrunner "github.com/yourname/sshops/internal/runner"
 	sshclient "github.com/yourname/sshops/internal/ssh"
-	"github.com/yourname/sshops/internal/vault"
 )
 
 func (s *Server) buildToolDefs() []ToolDef {
@@ -36,7 +35,7 @@ func (s *Server) buildToolDefs() []ToolDef {
 					"port":     map[string]interface{}{"type": "integer", "description": "SSH 端口，默认 22"},
 					"user":     map[string]interface{}{"type": "string", "description": "用户名，默认 root"},
 					"key_path": map[string]interface{}{"type": "string", "description": "私钥路径，可选"},
-					"password": map[string]interface{}{"type": "string", "description": "SSH 密码，可选，加密存入 vault"},
+					"password": map[string]interface{}{"type": "string", "description": "SSH 密码，可选，明文存入 inventory"},
 					"groups":   map[string]interface{}{"type": "string", "description": "分组，逗号分隔，如 prod,web"},
 					"tags":     map[string]interface{}{"type": "string", "description": "标签，如 env=prod,role=web"},
 				},
@@ -65,7 +64,7 @@ func (s *Server) buildToolDefs() []ToolDef {
 					"port":     map[string]interface{}{"type": "integer", "description": "新的端口"},
 					"user":     map[string]interface{}{"type": "string", "description": "新的用户名"},
 					"key_path": map[string]interface{}{"type": "string", "description": "新的私钥路径"},
-					"password": map[string]interface{}{"type": "string", "description": "新的密码，存入 vault"},
+					"password": map[string]interface{}{"type": "string", "description": "新的密码，明文存入 inventory"},
 					"groups":   map[string]interface{}{"type": "string", "description": "新的分组"},
 					"tags":     map[string]interface{}{"type": "string", "description": "新的标签"},
 				},
@@ -81,6 +80,7 @@ func (s *Server) buildToolDefs() []ToolDef {
 					"host":    map[string]interface{}{"type": "string", "description": "主机名称（inventory 中的 name）或 IP"},
 					"command": map[string]interface{}{"type": "string", "description": "要执行的 shell 命令"},
 					"timeout": map[string]interface{}{"type": "integer", "description": "超时秒数，默认 30"},
+					"key_path": map[string]interface{}{"type": "string", "description": "私钥路径覆盖，优先级高于 inventory"},
 				},
 				"required": []string{"host", "command"},
 			},
@@ -181,6 +181,7 @@ func (s *Server) buildToolDefs() []ToolDef {
 					"command":     map[string]interface{}{"type": "string", "description": "要执行的 shell 命令"},
 					"concurrency": map[string]interface{}{"type": "integer", "description": "并发数，默认 10"},
 					"timeout":     map[string]interface{}{"type": "integer", "description": "每台主机超时秒数，默认 connect_timeout"},
+					"key_path":    map[string]interface{}{"type": "string", "description": "私钥路径覆盖，优先级高于 inventory"},
 				},
 				"required": []string{"command"},
 			},
@@ -254,12 +255,13 @@ func (s *Server) toolAddServer(args map[string]interface{}) (string, error) {
 	}
 
 	h := &inventory.Host{
-		Name:    name,
-		Host:    host,
-		Port:    port,
-		User:    user,
-		KeyPath: getStringArg(args, "key_path"),
-		Groups:  parseCommaSeparatedList(getStringArg(args, "groups")),
+		Name:     name,
+		Host:     host,
+		Port:     port,
+		User:     user,
+		KeyPath:  getStringArg(args, "key_path"),
+		Password: getStringArg(args, "password"),
+		Groups:   parseCommaSeparatedList(getStringArg(args, "groups")),
 	}
 
 	tags, err := parseTagString(getStringArg(args, "tags"))
@@ -276,15 +278,8 @@ func (s *Server) toolAddServer(args map[string]interface{}) (string, error) {
 	}
 
 	result := fmt.Sprintf("✓ 已添加主机 %s (%s:%d)", h.Name, h.Host, h.Port)
-	password := getStringArg(args, "password")
-	if strings.TrimSpace(password) != "" {
-		msg, err := s.storeServerPassword(h.Name, password, h.KeyPath)
-		if err != nil {
-			return "", err
-		}
-		if msg != "" {
-			result += "\n" + msg
-		}
+	if strings.TrimSpace(h.Password) != "" {
+		result += "\n⚠ 密码已明文存储在 inventory 文件中，建议仅在可信环境中使用"
 	}
 
 	return result, nil
@@ -347,6 +342,9 @@ func (s *Server) toolUpdateServer(args map[string]interface{}) (string, error) {
 	if keyPath := getStringArg(args, "key_path"); keyPath != "" {
 		target.KeyPath = keyPath
 	}
+	if password := getStringArg(args, "password"); password != "" {
+		target.Password = password
+	}
 	if groups := getStringArg(args, "groups"); groups != "" {
 		target.Groups = parseCommaSeparatedList(groups)
 	}
@@ -362,19 +360,7 @@ func (s *Server) toolUpdateServer(args map[string]interface{}) (string, error) {
 		return "", err
 	}
 
-	result := fmt.Sprintf("✓ 已更新主机 %s", name)
-	password := getStringArg(args, "password")
-	if strings.TrimSpace(password) != "" {
-		msg, err := s.storeServerPassword(name, password, target.KeyPath)
-		if err != nil {
-			return "", err
-		}
-		if msg != "" {
-			result += "\n" + msg
-		}
-	}
-
-	return result, nil
+	return fmt.Sprintf("✓ 已更新主机 %s", name), nil
 }
 
 func (s *Server) toolExecCommand(args map[string]interface{}) (string, error) {
@@ -385,12 +371,13 @@ func (s *Server) toolExecCommand(args map[string]interface{}) (string, error) {
 	}
 
 	timeout := getIntArg(args, "timeout", 30)
+	keyPathOverride := getStringArg(args, "key_path")
 	h, err := s.resolveHost(hostArg)
 	if err != nil {
 		return "", err
 	}
 
-	client, err := s.openClient(h, timeout)
+	client, err := s.openClient(h, timeout, keyPathOverride)
 	if err != nil {
 		return "", err
 	}
@@ -674,13 +661,14 @@ func (s *Server) toolBatchExec(args map[string]interface{}) (string, error) {
 	if timeout <= 0 {
 		timeout = 30
 	}
+	keyPathOverride := getStringArg(args, "key_path")
 
 	tasks := make([]execrunner.Task, 0, len(hosts))
 	for _, h := range hosts {
 		if h == nil {
 			continue
 		}
-		keyPath, password := s.resolveCredential(h)
+		keyPath, password := s.resolveCredential(h, keyPathOverride)
 		tasks = append(tasks, execrunner.Task{
 			Host:     h,
 			Command:  command,
@@ -779,7 +767,7 @@ func (s *Server) resolveHost(hostArg string) (*inventory.Host, error) {
 	}, nil
 }
 
-func (s *Server) openClient(h *inventory.Host, timeout int) (*sshclient.Client, error) {
+func (s *Server) openClient(h *inventory.Host, timeout int, keyPathOverride string) (*sshclient.Client, error) {
 	if h == nil {
 		return nil, errors.New("主机信息为空")
 	}
@@ -796,7 +784,7 @@ func (s *Server) openClient(h *inventory.Host, timeout int) (*sshclient.Client, 
 		user = s.config.DefaultUser
 	}
 
-	keyPath, password := s.resolveCredential(h)
+	keyPath, password := s.resolveCredential(h, keyPathOverride)
 	client := sshclient.NewClient(h.Host, port, user, timeout)
 	if strings.TrimSpace(keyPath) != "" {
 		if err := client.WithKey(keyPath); err != nil {
@@ -828,7 +816,7 @@ func (s *Server) openClient(h *inventory.Host, timeout int) (*sshclient.Client, 
 }
 
 func (s *Server) openSFTPClient(h *inventory.Host) (*sshclient.Client, *sftp.Client, error) {
-	client, err := s.openClient(h, 30)
+	client, err := s.openClient(h, 30, "")
 	if err != nil {
 		return nil, nil, err
 	}
@@ -847,23 +835,30 @@ func (s *Server) openSFTPClient(h *inventory.Host) (*sshclient.Client, *sftp.Cli
 	return client, sftpClient, nil
 }
 
-func (s *Server) resolveCredential(h *inventory.Host) (string, string) {
+func (s *Server) resolveCredential(h *inventory.Host, keyPathOverride string) (string, string) {
 	keyPath := ""
 	password := ""
 
-	if s.vault != nil && h != nil {
-		if cred, err := s.vault.Get(h.Name); err == nil && cred != nil {
-			if strings.TrimSpace(cred.KeyPath) != "" {
-				keyPath = strings.TrimSpace(cred.KeyPath)
-			}
-			if strings.TrimSpace(cred.Password) != "" {
-				password = strings.TrimSpace(cred.Password)
-			}
-		}
+	// 优先级：
+	// 1. 参数传入的 key_path
+	// 2. host.KeyPath
+	// 3. host.Password
+	// 4. vault 密码
+	// 5. config.DefaultKeyPath
+	if strings.TrimSpace(keyPathOverride) != "" {
+		return strings.TrimSpace(keyPathOverride), ""
 	}
 
 	if keyPath == "" && h != nil && strings.TrimSpace(h.KeyPath) != "" {
 		keyPath = strings.TrimSpace(h.KeyPath)
+	}
+	if keyPath == "" && h != nil && strings.TrimSpace(h.Password) != "" {
+		password = strings.TrimSpace(h.Password)
+	}
+	if keyPath == "" && password == "" && s.vault != nil && h != nil {
+		if cred, err := s.vault.Get(h.Name); err == nil && cred != nil && strings.TrimSpace(cred.Password) != "" {
+			password = strings.TrimSpace(cred.Password)
+		}
 	}
 	if keyPath == "" {
 		keyPath = strings.TrimSpace(s.config.DefaultKeyPath)
@@ -1059,25 +1054,6 @@ func parseTagString(raw string) (map[string]string, error) {
 	}
 
 	return tags, nil
-}
-
-func (s *Server) storeServerPassword(name string, password string, keyPath string) (string, error) {
-	if s.vault == nil {
-		return "⚠ Vault 未初始化，已跳过密码保存", nil
-	}
-
-	if err := s.vault.Set(&vault.Credential{
-		Name:     name,
-		Password: password,
-		KeyPath:  keyPath,
-	}); err != nil {
-		if strings.Contains(err.Error(), "vault 未解锁") {
-			return "⚠ Vault 未解锁，已跳过密码保存", nil
-		}
-		return "", err
-	}
-
-	return "", nil
 }
 
 func shellQuote(value string) string {

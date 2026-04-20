@@ -16,6 +16,7 @@ type Host struct {
 	Port       int               `yaml:"port"`
 	User       string            `yaml:"user"`
 	KeyPath    string            `yaml:"key_path"`
+	Password   string            `yaml:"password,omitempty"`
 	Tags       map[string]string `yaml:"tags"`
 	Groups     []string          `yaml:"groups"`
 	ProxyChain string            `yaml:"proxy_chain"`

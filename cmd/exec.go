@@ -121,8 +121,14 @@ func execSingleHost(cmd *cobra.Command, cfg *config.Config, command string) {
 	hostAddr := execHost
 	port := execPort
 	user := execUser
-	keyPath := execKey
-	password := execPassword
+	keyPath := ""
+	password := ""
+	if cmd.Flags().Changed("key") {
+		keyPath = strings.TrimSpace(execKey)
+	}
+	if cmd.Flags().Changed("password") {
+		password = strings.TrimSpace(execPassword)
+	}
 	keyFlagChanged := cmd.Flags().Lookup("key") != nil && cmd.Flags().Lookup("key").Changed
 
 	if invHost != nil {
@@ -141,6 +147,18 @@ func execSingleHost(cmd *cobra.Command, cfg *config.Config, command string) {
 		}
 		if password == "" && !cmd.Flags().Changed("password") {
 			password = resolvedPassword
+		}
+	}
+
+	// No inventory match: fallback to explicit password or default key.
+	if invHost == nil && keyPath == "" && password == "" {
+		if strings.TrimSpace(execPassword) != "" {
+			password = strings.TrimSpace(execPassword)
+		} else {
+			keyPath = strings.TrimSpace(cfg.DefaultKeyPath)
+			if keyPath == "" {
+				keyPath = "id_rsa"
+			}
 		}
 	}
 
@@ -213,11 +231,11 @@ func execBatchHosts(cfg *config.Config, command string, userSpecifiedKey bool) {
 		os.Exit(1)
 	}
 
-	// Only unlock vault if at least one host has no KeyPath and no --key flag
+	// Only unlock vault if at least one host has neither key_path nor plaintext password and no --key flag
 	needsVault := false
 	if !userSpecifiedKey {
 		for _, h := range hosts {
-			if h != nil && strings.TrimSpace(h.KeyPath) == "" {
+			if h != nil && strings.TrimSpace(h.KeyPath) == "" && strings.TrimSpace(h.Password) == "" {
 				needsVault = true
 				break
 			}
@@ -279,13 +297,20 @@ func resolveTaskAuth(cfg *config.Config, h *inventory.Host, cred *vault.Credenti
 	keyPath := ""
 	password := ""
 
-	// KeyPath 优先级：--key > inventory host > vault > config default
+	// 优先级：
+	// 1. --key
+	// 2. host.KeyPath
+	// 3. host.Password
+	// 4. vault.Password
+	// 5. config.DefaultKeyPath
 	if userSpecifiedKey {
 		keyPath = strings.TrimSpace(execKey)
 	} else if h != nil && strings.TrimSpace(h.KeyPath) != "" {
 		keyPath = strings.TrimSpace(h.KeyPath)
-	} else if cred != nil && strings.TrimSpace(cred.KeyPath) != "" {
-		keyPath = strings.TrimSpace(cred.KeyPath)
+	} else if h != nil && strings.TrimSpace(h.Password) != "" {
+		password = strings.TrimSpace(h.Password)
+	} else if cred != nil && strings.TrimSpace(cred.Password) != "" {
+		password = strings.TrimSpace(cred.Password)
 	} else {
 		keyPath = strings.TrimSpace(cfg.DefaultKeyPath)
 		if keyPath == "" {
@@ -293,11 +318,9 @@ func resolveTaskAuth(cfg *config.Config, h *inventory.Host, cred *vault.Credenti
 		}
 	}
 
-	// Password 优先级：--password > vault
+	// 显式 --password 始终覆盖
 	if strings.TrimSpace(execPassword) != "" {
 		password = strings.TrimSpace(execPassword)
-	} else if cred != nil && strings.TrimSpace(cred.Password) != "" {
-		password = strings.TrimSpace(cred.Password)
 	}
 
 	return keyPath, password
@@ -307,29 +330,33 @@ func resolveHostAuth(cfg *config.Config, h *inventory.Host, userSpecifiedKey boo
 	keyPath := ""
 	password := ""
 
-	// KeyPath 优先级：--key flag > inventory host > vault > config default
+	// 优先级：
+	// 1. --key
+	// 2. host.KeyPath
+	// 3. host.Password
+	// 4. vault.Password
+	// 5. config.DefaultKeyPath
 	if userSpecifiedKey {
 		keyPath = strings.TrimSpace(execKey)
 	} else if h != nil && strings.TrimSpace(h.KeyPath) != "" {
 		keyPath = strings.TrimSpace(h.KeyPath)
+	} else if h != nil && strings.TrimSpace(h.Password) != "" {
+		password = strings.TrimSpace(h.Password)
 	}
 
-	// Password 优先级：--password flag > vault
+	// 显式 --password 始终覆盖
 	if strings.TrimSpace(execPassword) != "" {
 		password = strings.TrimSpace(execPassword)
 	}
 
-	// Only try Vault if no credential found yet (keyPath and password both empty)
+	// Only try Vault password if no credential found yet
 	if keyPath == "" && password == "" {
 		v := unlockVaultOptional(cfg.VaultPath)
 		if v != nil {
 			cred := findVaultCredential(v, h.Name)
 			v.Lock()
 			if cred != nil {
-				if keyPath == "" && strings.TrimSpace(cred.KeyPath) != "" {
-					keyPath = strings.TrimSpace(cred.KeyPath)
-				}
-				if password == "" && strings.TrimSpace(cred.Password) != "" {
+				if strings.TrimSpace(cred.Password) != "" {
 					password = strings.TrimSpace(cred.Password)
 				}
 			}
@@ -401,9 +428,6 @@ func applyExecDefaults(cmd *cobra.Command, cfg *config.Config) {
 	if passwordProvided {
 		execKey = ""
 		return
-	}
-	if strings.TrimSpace(execKey) == "" {
-		execKey = cfg.DefaultKeyPath
 	}
 }
 
