@@ -20,10 +20,58 @@ import (
 	"github.com/yourname/sshops/internal/playbook"
 	execrunner "github.com/yourname/sshops/internal/runner"
 	sshclient "github.com/yourname/sshops/internal/ssh"
+	"github.com/yourname/sshops/internal/vault"
 )
 
 func (s *Server) buildToolDefs() []ToolDef {
 	return []ToolDef{
+		{
+			Name:        "add_server",
+			Description: "添加主机到 inventory 清单",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"name":     map[string]interface{}{"type": "string", "description": "主机别名，唯一标识"},
+					"host":     map[string]interface{}{"type": "string", "description": "IP 或域名"},
+					"port":     map[string]interface{}{"type": "integer", "description": "SSH 端口，默认 22"},
+					"user":     map[string]interface{}{"type": "string", "description": "用户名，默认 root"},
+					"key_path": map[string]interface{}{"type": "string", "description": "私钥路径，可选"},
+					"password": map[string]interface{}{"type": "string", "description": "SSH 密码，可选，加密存入 vault"},
+					"groups":   map[string]interface{}{"type": "string", "description": "分组，逗号分隔，如 prod,web"},
+					"tags":     map[string]interface{}{"type": "string", "description": "标签，如 env=prod,role=web"},
+				},
+				"required": []string{"name", "host"},
+			},
+		},
+		{
+			Name:        "remove_server",
+			Description: "从 inventory 清单中删除主机",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"name": map[string]interface{}{"type": "string", "description": "主机别名"},
+				},
+				"required": []string{"name"},
+			},
+		},
+		{
+			Name:        "update_server",
+			Description: "更新主机信息（只更新传入的字段）",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"name":     map[string]interface{}{"type": "string", "description": "主机别名（必填，用于查找）"},
+					"host":     map[string]interface{}{"type": "string", "description": "新的 IP 或域名"},
+					"port":     map[string]interface{}{"type": "integer", "description": "新的端口"},
+					"user":     map[string]interface{}{"type": "string", "description": "新的用户名"},
+					"key_path": map[string]interface{}{"type": "string", "description": "新的私钥路径"},
+					"password": map[string]interface{}{"type": "string", "description": "新的密码，存入 vault"},
+					"groups":   map[string]interface{}{"type": "string", "description": "新的分组"},
+					"tags":     map[string]interface{}{"type": "string", "description": "新的标签"},
+				},
+				"required": []string{"name"},
+			},
+		},
 		{
 			Name:        "exec_command",
 			Description: "在远程服务器上执行 shell 命令。适用于：查看日志、检查进程、修改配置、重启服务等单次操作。如需批量操作多台主机请用 batch_exec。",
@@ -154,6 +202,12 @@ func (s *Server) buildToolDefs() []ToolDef {
 
 func (s *Server) callTool(name string, args map[string]interface{}) (string, error) {
 	switch name {
+	case "add_server":
+		return s.toolAddServer(args)
+	case "remove_server":
+		return s.toolRemoveServer(args)
+	case "update_server":
+		return s.toolUpdateServer(args)
 	case "exec_command":
 		return s.toolExecCommand(args)
 	case "upload_file":
@@ -177,6 +231,150 @@ func (s *Server) callTool(name string, args map[string]interface{}) (string, err
 	default:
 		return "", fmt.Errorf("未知 tool: %s", name)
 	}
+}
+
+func (s *Server) toolAddServer(args map[string]interface{}) (string, error) {
+	if s.inventory == nil {
+		return "", errors.New("inventory 未初始化")
+	}
+
+	name := getStringArg(args, "name")
+	host := getStringArg(args, "host")
+	if name == "" || host == "" {
+		return "", errors.New("name 和 host 为必填参数")
+	}
+
+	port := getIntArg(args, "port", 22)
+	if port <= 0 {
+		port = 22
+	}
+	user := getStringArg(args, "user")
+	if user == "" {
+		user = "root"
+	}
+
+	h := &inventory.Host{
+		Name:    name,
+		Host:    host,
+		Port:    port,
+		User:    user,
+		KeyPath: getStringArg(args, "key_path"),
+		Groups:  parseCommaSeparatedList(getStringArg(args, "groups")),
+	}
+
+	tags, err := parseTagString(getStringArg(args, "tags"))
+	if err != nil {
+		return "", err
+	}
+	h.Tags = tags
+
+	if err := s.inventory.Add(h); err != nil {
+		return "", err
+	}
+	if err := s.inventory.Save(); err != nil {
+		return "", err
+	}
+
+	result := fmt.Sprintf("✓ 已添加主机 %s (%s:%d)", h.Name, h.Host, h.Port)
+	password := getStringArg(args, "password")
+	if strings.TrimSpace(password) != "" {
+		msg, err := s.storeServerPassword(h.Name, password, h.KeyPath)
+		if err != nil {
+			return "", err
+		}
+		if msg != "" {
+			result += "\n" + msg
+		}
+	}
+
+	return result, nil
+}
+
+func (s *Server) toolRemoveServer(args map[string]interface{}) (string, error) {
+	if s.inventory == nil {
+		return "", errors.New("inventory 未初始化")
+	}
+
+	name := getStringArg(args, "name")
+	if name == "" {
+		return "", errors.New("name 为必填参数")
+	}
+
+	if err := s.inventory.Remove(name); err != nil {
+		return "", err
+	}
+	if err := s.inventory.Save(); err != nil {
+		return "", err
+	}
+
+	return fmt.Sprintf("✓ 已删除主机 %s", name), nil
+}
+
+func (s *Server) toolUpdateServer(args map[string]interface{}) (string, error) {
+	if s.inventory == nil {
+		return "", errors.New("inventory 未初始化")
+	}
+
+	name := getStringArg(args, "name")
+	if name == "" {
+		return "", errors.New("name 为必填参数")
+	}
+
+	if _, err := s.inventory.Get(name); err != nil {
+		return "", err
+	}
+
+	var target *inventory.Host
+	for _, h := range s.inventory.Hosts {
+		if h != nil && strings.TrimSpace(h.Name) == name {
+			target = h
+			break
+		}
+	}
+	if target == nil {
+		return "", fmt.Errorf("主机 %s 不存在", name)
+	}
+
+	if host := getStringArg(args, "host"); host != "" {
+		target.Host = host
+	}
+	if port := getIntArg(args, "port", 0); port > 0 {
+		target.Port = port
+	}
+	if user := getStringArg(args, "user"); user != "" {
+		target.User = user
+	}
+	if keyPath := getStringArg(args, "key_path"); keyPath != "" {
+		target.KeyPath = keyPath
+	}
+	if groups := getStringArg(args, "groups"); groups != "" {
+		target.Groups = parseCommaSeparatedList(groups)
+	}
+	if rawTags := getStringArg(args, "tags"); rawTags != "" {
+		tags, err := parseTagString(rawTags)
+		if err != nil {
+			return "", err
+		}
+		target.Tags = tags
+	}
+
+	if err := s.inventory.Save(); err != nil {
+		return "", err
+	}
+
+	result := fmt.Sprintf("✓ 已更新主机 %s", name)
+	password := getStringArg(args, "password")
+	if strings.TrimSpace(password) != "" {
+		msg, err := s.storeServerPassword(name, password, target.KeyPath)
+		if err != nil {
+			return "", err
+		}
+		if msg != "" {
+			result += "\n" + msg
+		}
+	}
+
+	return result, nil
 }
 
 func (s *Server) toolExecCommand(args map[string]interface{}) (string, error) {
@@ -822,6 +1020,64 @@ func getStringMapArg(args map[string]interface{}, key string) (map[string]string
 	default:
 		return nil, fmt.Errorf("%s 必须是 object", key)
 	}
+}
+
+func parseCommaSeparatedList(raw string) []string {
+	if strings.TrimSpace(raw) == "" {
+		return []string{}
+	}
+
+	items := strings.Split(raw, ",")
+	result := make([]string, 0, len(items))
+	for _, item := range items {
+		value := strings.TrimSpace(item)
+		if value != "" {
+			result = append(result, value)
+		}
+	}
+	return result
+}
+
+func parseTagString(raw string) (map[string]string, error) {
+	tags := map[string]string{}
+	if strings.TrimSpace(raw) == "" {
+		return tags, nil
+	}
+
+	items := strings.Split(raw, ",")
+	for _, item := range items {
+		value := strings.TrimSpace(item)
+		if value == "" {
+			continue
+		}
+
+		parts := strings.SplitN(value, "=", 2)
+		if len(parts) != 2 || strings.TrimSpace(parts[0]) == "" || strings.TrimSpace(parts[1]) == "" {
+			return nil, errors.New("tags 格式错误，请使用 key=value,key=value")
+		}
+		tags[strings.TrimSpace(parts[0])] = strings.TrimSpace(parts[1])
+	}
+
+	return tags, nil
+}
+
+func (s *Server) storeServerPassword(name string, password string, keyPath string) (string, error) {
+	if s.vault == nil {
+		return "⚠ Vault 未初始化，已跳过密码保存", nil
+	}
+
+	if err := s.vault.Set(&vault.Credential{
+		Name:     name,
+		Password: password,
+		KeyPath:  keyPath,
+	}); err != nil {
+		if strings.Contains(err.Error(), "vault 未解锁") {
+			return "⚠ Vault 未解锁，已跳过密码保存", nil
+		}
+		return "", err
+	}
+
+	return "", nil
 }
 
 func shellQuote(value string) string {
